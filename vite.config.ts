@@ -18,9 +18,9 @@ export default defineConfig(() => {
         includeAssets: ['favicon.ico', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png', 'sw-notification.js'],
         manifest: {
           id: './',
-          name: 'K02 Mobile QLVB',
-          short_name: 'K02 QLVB',
-          description: 'Quản lý văn bản, theo dõi thời hạn báo cáo và đồng bộ Excel với bản PC',
+          name: 'Quản Lý Văn Bản PRO',
+          short_name: 'QLVB K02 PRO',
+          description: 'Quản lý văn bản, theo dõi thời hạn báo cáo và đồng bộ',
           theme_color: '#1e40af',
           background_color: '#f8fafc',
           display: 'standalone',
