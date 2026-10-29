@@ -41,6 +41,7 @@ import {
   connectWithExternalToken,
   generateApkAuthBridgeCode,
   generateApkDeepLink,
+  generatePwaReturnUrl,
   WEB_AUTH_PORTAL_URL,
   logoutGoogle,
   initAuth,
@@ -81,14 +82,15 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
   const [isRestoring, setIsRestoring] = useState(false);
   const [isDownloadingFileId, setIsDownloadingFileId] = useState<string | null>(null);
 
-  // APK Auth Bridge State
+  // APK & PWA Auth Bridge State
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenInputStr, setTokenInputStr] = useState('');
   const [copiedBridgeCode, setCopiedBridgeCode] = useState(false);
   const isApkMode = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
-  const isApkAuthPortal =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('apk_auth') === '1';
+  const searchParams =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const isApkAuthPortal = Boolean(searchParams && searchParams.get('apk_auth') === '1');
+  const pwaOriginParam = searchParams ? searchParams.get('pwa_origin') : null;
 
   // Auto clear status notification after 8 seconds
   useEffect(() => {
@@ -99,6 +101,45 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       return () => clearTimeout(timer);
     }
   }, [importStatus.type]);
+
+  const dispatchPortalAuthResult = () => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const isPortal = params.get('apk_auth') === '1';
+    const pwaOrigin = params.get('pwa_origin');
+    const bridgeCode = generateApkAuthBridgeCode();
+
+    if (bridgeCode && window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: 'K02_AUTH_BRIDGE_CODE', code: bridgeCode }, '*');
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch {
+          // Ignore close error
+        }
+      }, 350);
+      return;
+    }
+
+    if (pwaOrigin) {
+      const returnUrl = generatePwaReturnUrl(pwaOrigin);
+      if (returnUrl) {
+        setTimeout(() => {
+          window.location.href = returnUrl;
+        }, 450);
+        return;
+      }
+    }
+
+    if (isPortal) {
+      const deepLink = generateApkDeepLink(false);
+      if (deepLink) {
+        setTimeout(() => {
+          window.location.href = deepLink;
+        }, 600);
+      }
+    }
+  };
 
   useEffect(() => {
     const consumeNativeDeepLink = async () => {
@@ -122,22 +163,36 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       }
     };
 
+    const consumeWebAuthCallbackUrl = async () => {
+      if (typeof window === 'undefined') return;
+      const urlParams = new URLSearchParams(window.location.search);
+      const externalCode = urlParams.get('code');
+      if (externalCode && externalCode.trim().length > 0) {
+        urlParams.delete('code');
+        const nextQuery = urlParams.toString();
+        const cleanUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash}`;
+        window.history.replaceState({}, document.title, cleanUrl);
+
+        setIsDriveLoading(true);
+        setDriveStatus('Đang nhận phiên đăng nhập Google Drive...');
+        try {
+          const res = await connectWithExternalToken(externalCode);
+          setUser(res.user);
+          setDriveStatus('✓ Đã kết nối tài khoản Google Drive thành công!');
+          await fetchRecentBackups(res.accessToken);
+        } catch (err: any) {
+          setDriveStatus(`Lỗi xác thực phiên đăng nhập: ${err.message}`);
+        } finally {
+          setIsDriveLoading(false);
+        }
+      }
+    };
+
     const unsubscribe = initAuth((currentUser, token) => {
       setUser(currentUser);
       if (token) {
         fetchRecentBackups(token);
-        // If opened in Chrome with ?apk_auth=1, auto-redirect back to APK
-        if (
-          typeof window !== 'undefined' &&
-          new URLSearchParams(window.location.search).get('apk_auth') === '1'
-        ) {
-          const deepLink = generateApkDeepLink(false);
-          if (deepLink) {
-            setTimeout(() => {
-              window.location.href = deepLink;
-            }, 600);
-          }
-        }
+        dispatchPortalAuthResult();
       }
     }, () => {
       setUser(null);
@@ -145,6 +200,8 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     });
 
     consumeNativeDeepLink();
+    consumeWebAuthCallbackUrl();
+
     const onApkAuthEvent = () => consumeNativeDeepLink();
     const onFocusOrVisible = () => {
       if (document.visibilityState === 'visible') {
@@ -188,15 +245,10 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       setUser(res.user);
       setDriveStatus('Đã kết nối tài khoản Google thành công!');
       await fetchRecentBackups(res.accessToken);
-      if (isApkAuthPortal) {
-        const deepLink = generateApkDeepLink(false);
-        if (deepLink) {
-          window.location.href = deepLink;
-        }
-      }
+      dispatchPortalAuthResult();
     } catch (err: any) {
       setDriveStatus(
-        `Lỗi kết nối: ${err.message || 'Không thể đăng nhập'}. Bạn có thể bấm "Đăng nhập Chuyển hướng" hoặc "Mở Chrome & Kết nối về App" bên dưới.`
+        `Lỗi kết nối: ${err.message || 'Không thể đăng nhập'}. Bạn có thể bấm "Đăng nhập Tài khoản" hoặc "Nhập Mã Kết Nối" bên dưới.`
       );
     } finally {
       setIsDriveLoading(false);
@@ -247,7 +299,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     if (!code) return;
     navigator.clipboard.writeText(code);
     setCopiedBridgeCode(true);
-    setDriveStatus('✓ Đã sao chép Mã Kết Nối APK vào bộ nhớ tạm! Hãy mở App APK và bấm "Dán Mã Kết Nối".');
+    setDriveStatus('✓ Đã sao chép Mã Kết Nối vào bộ nhớ tạm! Hãy mở App/PWA và bấm "Nhập Mã Kết Nối".');
     setTimeout(() => setCopiedBridgeCode(false), 3500);
   };
 
@@ -686,17 +738,30 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
                 </div>
               </div>
 
-              {/* Bridge to Android APK when logged in on Web Browser */}
+              {/* Bridge to Android APK or External PWA when logged in on Web Browser */}
               {!isApkMode && (
                 <div className="p-2.5 rounded-xl bg-emerald-50/90 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="text-[11px] text-emerald-900">
                     <span className="font-bold flex items-center gap-1">
                       <Smartphone className="w-3.5 h-3.5 text-emerald-700" />
-                      Đang dùng App APK trên điện thoại?
+                      {pwaOriginParam ? 'Đã xác thực thành công cho PWA!' : 'Đang dùng App APK / PWA trên thiết bị khác?'}
                     </span>
-                    <span>Chuyển trực tiếp phiên đăng nhập Google Drive này vào ứng dụng APK:</span>
+                    <span>
+                      {pwaOriginParam
+                        ? 'Bấm nút bên dưới nếu trình duyệt chưa tự động chuyển về ứng dụng PWA:'
+                        : 'Chuyển trực tiếp phiên đăng nhập Google Drive này vào ứng dụng APK hoặc PWA:'}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                    {pwaOriginParam && (
+                      <a
+                        href={generatePwaReturnUrl(pwaOriginParam) || '#'}
+                        className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-xs transition"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Quay về ứng dụng PWA</span>
+                      </a>
+                    )}
                     <a
                       href={generateApkDeepLink(false) || '#'}
                       className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-xs transition"
@@ -736,8 +801,8 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
                 </button>
               </div>
 
-              {/* Additional In-App Auth Method */}
-              <div className="pt-1">
+              {/* Additional In-App & Bridge Auth Methods */}
+              <div className="pt-1 flex flex-wrap items-center gap-2">
                 <button
                   onClick={handleConnectDriveRedirect}
                   disabled={isDriveLoading}
@@ -746,7 +811,49 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
                   <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                   <span>Đăng nhập Tài khoản</span>
                 </button>
+
+                <button
+                  onClick={() => setShowTokenInput((prev) => !prev)}
+                  disabled={isDriveLoading}
+                  className="w-full sm:w-auto justify-center flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold text-[11px] transition"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                  <span>Nhập Mã Kết Nối</span>
+                </button>
               </div>
+
+              {showTokenInput && (
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 animate-fadeIn">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-slate-700">
+                      Dán Mã Kết Nối từ cổng xác thực Web:
+                    </span>
+                    <button
+                      onClick={handleOpenChromeLogin}
+                      className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Mở Cổng Xác Thực Lấy Mã</span>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={tokenInputStr}
+                      onChange={(e) => setTokenInputStr(e.target.value)}
+                      placeholder="Dán Mã Kết Nối (Base64 hoặc URL) vào đây..."
+                      className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={handleConnectWithTokenCode}
+                      disabled={isDriveLoading || !tokenInputStr.trim()}
+                      className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition disabled:opacity-50"
+                    >
+                      Kết nối
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

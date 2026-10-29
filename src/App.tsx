@@ -35,7 +35,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('apk_auth') === '1' || params.get('tab') === 'sync') {
+      if (params.get('apk_auth') === '1' || params.get('tab') === 'sync' || params.get('code')) {
         return 'sync';
       }
     }

@@ -117,6 +117,87 @@ export const initAuth = (
   });
 };
 
+export const getPwaAuthPortalUrl = (): string => {
+  if (typeof window === 'undefined') return WEB_AUTH_PORTAL_URL;
+  const cleanOriginUrl = `${window.location.origin}${window.location.pathname}`;
+  return `${WEB_AUTH_PORTAL_URL}&pwa_origin=${encodeURIComponent(cleanOriginUrl)}`;
+};
+
+export const generatePwaReturnUrl = (pwaOrigin: string): string | null => {
+  const code = generateApkAuthBridgeCode();
+  if (!code || !pwaOrigin) return null;
+  try {
+    const returnUrl = new URL(pwaOrigin);
+    returnUrl.searchParams.set('code', code);
+    returnUrl.searchParams.set('tab', 'sync');
+    return returnUrl.toString();
+  } catch {
+    const sep = pwaOrigin.includes('?') ? '&' : '?';
+    return `${pwaOrigin}${sep}code=${encodeURIComponent(code)}&tab=sync`;
+  }
+};
+
+const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: string }> => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Môi trường không hỗ trợ cửa sổ xác thực.'));
+      return;
+    }
+
+    const portalUrl = getPwaAuthPortalUrl();
+    const width = 520;
+    const height = 680;
+    const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
+    const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
+
+    const popup = window.open(
+      portalUrl,
+      'k02_pwa_google_auth',
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+    );
+
+    // If popup was blocked by browser (e.g. mobile standalone PWA), redirect in same tab
+    if (!popup) {
+      window.location.href = portalUrl;
+      return;
+    }
+
+    let settled = false;
+    const cleanup = () => {
+      window.removeEventListener('message', onMessage);
+      clearInterval(checkClosedTimer);
+    };
+
+    const onMessage = async (event: MessageEvent) => {
+      if (event.data && event.data.type === 'K02_AUTH_BRIDGE_CODE' && typeof event.data.code === 'string') {
+        settled = true;
+        cleanup();
+        try {
+          if (!popup.closed) popup.close();
+        } catch {
+          // Ignore popup close error
+        }
+        try {
+          const res = await connectWithExternalToken(event.data.code);
+          resolve(res);
+        } catch (err) {
+          reject(err);
+        }
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+
+    const checkClosedTimer = setInterval(() => {
+      if (popup.closed && !settled) {
+        settled = true;
+        cleanup();
+        reject(new Error('Đã đóng cửa sổ xác thực trước khi hoàn tất đăng nhập.'));
+      }
+    }, 800);
+  });
+};
+
 export const googleSignIn = async (forceConsent = false): Promise<{ user: User; accessToken: string }> => {
   try {
     isSigningIn = true;
@@ -140,6 +221,16 @@ export const googleSignIn = async (forceConsent = false): Promise<{ user: User; 
     });
     return { user: result.user, accessToken: credential.accessToken };
   } catch (error: any) {
+    const isUnauthorizedDomain =
+      error?.code === 'auth/unauthorized-domain' ||
+      String(error?.message || '').includes('auth/unauthorized-domain');
+    const isApkWebView = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
+
+    if (isUnauthorizedDomain && !isApkWebView) {
+      console.info('Domain not in Firebase authorizedDomains, falling back to authorized portal popup...');
+      return await signInViaAuthorizedPortalPopup();
+    }
+
     console.error('Google Sign-in error:', error);
     throw error;
   } finally {
@@ -148,12 +239,27 @@ export const googleSignIn = async (forceConsent = false): Promise<{ user: User; 
 };
 
 /**
- * Direct same-window redirect sign-in (works in Android WebView on https://gen-lang-client-0383399711.firebaseapp.com without popups)
+ * Direct same-window redirect sign-in (works in Android WebView on https://gen-lang-client-0383399711.firebaseapp.com without popups,
+ * and falls back to the authorized portal redirect when running on external PWA domains like GitHub Pages)
  */
 export const googleSignInRedirect = async (): Promise<void> => {
-  isSigningIn = true;
-  provider.setCustomParameters({ prompt: 'select_account' });
-  await signInWithRedirect(auth, provider);
+  try {
+    isSigningIn = true;
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await signInWithRedirect(auth, provider);
+  } catch (error: any) {
+    isSigningIn = false;
+    const isUnauthorizedDomain =
+      error?.code === 'auth/unauthorized-domain' ||
+      String(error?.message || '').includes('auth/unauthorized-domain');
+    const isApkWebView = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
+
+    if (isUnauthorizedDomain && !isApkWebView && typeof window !== 'undefined') {
+      window.location.href = getPwaAuthPortalUrl();
+      return;
+    }
+    throw error;
+  }
 };
 
 /**
