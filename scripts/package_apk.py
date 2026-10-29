@@ -17,8 +17,8 @@ FRAMEWORK_RES = Path("/usr/share/android-framework-res/framework-res.apk")
 MANIFEST_XML = """<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.k02.qlvbpro"
-    android:versionCode="195"
-    android:versionName="19.5">
+    android:versionCode="196"
+    android:versionName="19.6">
 
     <uses-sdk
         android:minSdkVersion="22"
@@ -192,13 +192,15 @@ def main():
         final_apk_data = aligned_apk.read_bytes()
         print(f"Successfully generated signed APK. Size: {len(final_apk_data)} bytes")
 
-        # Remove older versioned APKs so /public/ stays clean with 19.5
+        # Remove older versioned APKs so /public/ stays clean with 19.6
         for old_apk in [
+            PUBLIC_DIR / "k02_mobile_qlvb_19.5.apk",
             PUBLIC_DIR / "k02_mobile_qlvb_19.4.apk",
             PUBLIC_DIR / "k02_mobile_qlvb_19.3.apk",
             PUBLIC_DIR / "k02_mobile_qlvb_19.2.apk",
             PUBLIC_DIR / "k02_mobile_qlvb_19.1.apk",
             PUBLIC_DIR / "k02_mobile_qlvb_1.9.apk",
+            DIST_DIR / "k02_mobile_qlvb_19.5.apk",
             DIST_DIR / "k02_mobile_qlvb_19.4.apk",
             DIST_DIR / "k02_mobile_qlvb_19.3.apk",
             DIST_DIR / "k02_mobile_qlvb_19.2.apk",
@@ -209,9 +211,9 @@ def main():
                 old_apk.unlink()
 
         outputs = [
-            PUBLIC_DIR / "k02_mobile_qlvb_19.5.apk",
+            PUBLIC_DIR / "k02_mobile_qlvb_19.6.apk",
             PUBLIC_DIR / "k02_mobile_qlvb.apk",
-            DIST_DIR / "k02_mobile_qlvb_19.5.apk",
+            DIST_DIR / "k02_mobile_qlvb_19.6.apk",
             DIST_DIR / "k02_mobile_qlvb.apk",
         ]
         for out in outputs:
@@ -233,7 +235,7 @@ def main():
         dist_web_zip = DIST_DIR / "k02_web_html.zip"
         dist_web_zip.write_bytes(web_zip_path.read_bytes())
 
-    print("\n[SUCCESS] APK v19.5 compiled with official aapt, aligned & signed successfully!")
+    print("\n[SUCCESS] APK v19.6 compiled with official aapt, aligned & signed successfully!")
 
 if __name__ == "__main__":
     main()

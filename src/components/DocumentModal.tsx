@@ -8,7 +8,7 @@ import {
   SecurityLevel,
   EffectStatus,
 } from '../types';
-import { displayDate, parseDateInput, parseFlexibleDate, searchKey } from '../utils/dateUtils';
+import { displayDate, parseDateInput, parseFlexibleDate, searchKey, formatDateInputMask } from '../utils/dateUtils';
 import { ATTACHMENT_PREFIX, getAttachment, saveAttachment, openAttachment, chooseAttachmentFolder } from '../services/attachmentService';
 
 interface DocumentModalProps {
@@ -466,9 +466,11 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
               </label>
               <input
                 type="text"
+                inputMode="numeric"
+                maxLength={10}
                 placeholder="dd/mm/yyyy"
                 value={issued}
-                onChange={(e) => setIssued(e.target.value)}
+                onChange={(e) => setIssued((prev) => formatDateInputMask(e.target.value, prev))}
                 className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-800"
                 required
               />

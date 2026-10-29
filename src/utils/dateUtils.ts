@@ -62,15 +62,47 @@ export function periodLabel(iso: string | null | undefined): string {
 }
 
 /**
- * Parse DD/MM/YYYY or YYYY-MM-DD to YYYY-MM-DD
+ * Auto-format date input with '/' separators as user types (e.g. 29102026 -> 29/10/2026)
+ */
+export function formatDateInputMask(value: string, prevValue = ''): string {
+  if (!value) return '';
+
+  // Allow natural backspacing without re-appending trailing slash
+  if (prevValue && value.length < prevValue.length) {
+    return value.replace(/[^0-9/]/g, '');
+  }
+
+  // Auto-pad single digit day or month when user manually types '/'
+  if (/^\d\/$/.test(value)) {
+    return `0${value}`;
+  }
+  if (/^\d{2}\/\d\/$/.test(value)) {
+    return `${value.slice(0, 3)}0${value.slice(3)}`;
+  }
+
+  const digits = value.replace(/\D/g, '').slice(0, 8);
+  if (digits.length === 0) return '';
+  if (digits.length < 2) return digits;
+  if (digits.length === 2) return `${digits}/`;
+  if (digits.length < 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  if (digits.length === 4) return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+}
+
+/**
+ * Parse DD/MM/YYYY, DDMMYYYY, or YYYY-MM-DD to YYYY-MM-DD
  */
 export function parseDateInput(s: string): string | null {
   if (!s) return null;
   const clean = s.trim();
   // If already YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+  // If 8 raw digits DDMMYYYY
+  const normalized = /^\d{8}$/.test(clean)
+    ? `${clean.slice(0, 2)}/${clean.slice(2, 4)}/${clean.slice(4, 8)}`
+    : clean;
   // If DD/MM/YYYY
-  const parts = clean.split('/');
+  const parts = normalized.split('/');
   if (parts.length === 3) {
     const [d, m, y] = parts.map((p) => parseInt(p, 10));
     if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {

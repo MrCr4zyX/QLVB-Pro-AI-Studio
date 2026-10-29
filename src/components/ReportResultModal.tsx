@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, RotateCcw, FileText, Calendar, Save, History } from 'lucide-react';
 import { EnrichedReport, ResultAudit } from '../types';
-import { displayDate, parseDateInput } from '../utils/dateUtils';
+import { displayDate, parseDateInput, formatDateInputMask } from '../utils/dateUtils';
 
 interface ReportResultModalProps {
   isOpen: boolean;
@@ -97,9 +97,11 @@ export const ReportResultModal: React.FC<ReportResultModalProps> = ({
             </label>
             <input
               type="text"
+              inputMode="numeric"
+              maxLength={10}
               placeholder="dd/mm/yyyy"
               value={completedDate}
-              onChange={(e) => setCompletedDate(e.target.value)}
+              onChange={(e) => setCompletedDate((prev) => formatDateInputMask(e.target.value, prev))}
               className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-800"
               required
             />
