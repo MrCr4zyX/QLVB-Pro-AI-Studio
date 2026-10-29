@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { EnrichedDocument, DocumentType, WorkField } from '../types';
-import { displayDate } from '../utils/dateUtils';
+import { displayDate, formatDocCode } from '../utils/dateUtils';
 
 interface StatisticsTabProps {
   documents: EnrichedDocument[];
@@ -151,7 +151,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   }, [documents, activeStatus, selectedType, selectedField]);
 
   return (
-    <div className="pb-24 pt-3 px-3.5 max-w-4xl mx-auto space-y-4">
+    <div className="pb-24 pt-4 px-3.5 max-w-4xl mx-auto space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -184,7 +184,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             type="button"
             onClick={() => setActiveStatus(value)}
             aria-pressed={activeStatus === value}
-            className={`min-h-[38px] px-2.5 py-2 rounded-xl border text-left flex items-center justify-between gap-2 transition ${activeStatus === value ? activeStyle + ' shadow-sm ring-1 ring-blue-200' : idleStyle}`}
+            className={`min-h-[38px] px-2.5 py-2 rounded-xl border text-left flex items-center justify-between gap-2 transition ${activeStatus === value ? activeStyle + ' shadow-sm ring-1 ring-inset ring-white/30' : idleStyle}`}
           >
             <span className="text-[12px] font-bold uppercase leading-tight">{label}</span>
             <span className="text-lg font-black tabular-nums shrink-0">{count}</span>
@@ -200,18 +200,28 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase">
               <Layers className="w-4 h-4 text-blue-600" /> Theo loại văn bản
             </h3>
-            {selectedType && <button type="button" onClick={() => setSelectedType(null)} aria-label="Bỏ lọc loại văn bản" title="Bỏ lọc loại văn bản" className="flex items-center gap-0.5 text-[10px] text-blue-700 bg-blue-50 rounded-lg px-1.5 py-1"><X className="w-3 h-3" /> Bỏ lọc</button>}
+            {selectedType && <button type="button" onClick={() => setSelectedType(null)} aria-label="Bỏ lọc loại văn bản" title="Bỏ lọc loại văn bản" className="flex items-center gap-0.5 text-[10px] text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-1.5 py-1"><X className="w-3 h-3" /> Bỏ lọc</button>}
           </div>
-          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+          <div className="space-y-1.5 max-h-56 overflow-y-auto p-0.5 pr-1">
             {typeBreakdown.slice().sort((a, b) => getTypePriority(a[0]) - getTypePriority(b[0]) || a[0].localeCompare(b[0], 'vi')).map(([name, count]) => {
               const pct = statusStats.total > 0 ? (count / statusStats.total) * 100 : 0;
+              const isSelected = selectedType === name;
               return (
-                <button type="button" key={name} onClick={() => setSelectedType(selectedType === name ? null : name)} aria-pressed={selectedType === name}
-                  className={`block w-full text-left space-y-0.5 rounded-lg px-1 py-0.5 transition ${selectedType === name ? 'bg-blue-100 ring-1 ring-blue-300' : 'hover:bg-slate-50'}`}>
-                  <div className="flex justify-between text-xs font-medium text-slate-700 gap-2">
-                    <span>{name}</span><span className="font-bold shrink-0">{count} ({pct.toFixed(0)}%)</span>
+                <button
+                  type="button"
+                  key={name}
+                  onClick={() => setSelectedType(isSelected ? null : name)}
+                  aria-pressed={isSelected}
+                  className={`block w-full text-left rounded-lg px-2.5 py-1.5 border transition ${
+                    isSelected
+                      ? 'bg-blue-100/90 border-blue-400 shadow-2xs'
+                      : 'border-transparent hover:bg-slate-50 hover:border-slate-200'
+                  }`}
+                >
+                  <div className={`flex justify-between text-xs font-medium gap-2 ${isSelected ? 'text-blue-950 font-semibold' : 'text-slate-700'}`}>
+                    <span>{name}</span>
+                    <span className="font-bold shrink-0">{count} ({pct.toFixed(0)}%)</span>
                   </div>
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden"><div className="bg-blue-600 h-full rounded-full" style={{ width: `${pct}%` }} /></div>
                 </button>
               );
             })}
@@ -224,18 +234,27 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase">
               <PieChart className="w-4 h-4 text-indigo-600" /> Theo lĩnh vực công tác
             </h3>
-            {selectedField && <button type="button" onClick={() => setSelectedField(null)} aria-label="Bỏ lọc lĩnh vực" title="Bỏ lọc lĩnh vực" className="flex items-center gap-0.5 text-[10px] text-indigo-700 bg-indigo-50 rounded-lg px-1.5 py-1"><X className="w-3 h-3" /> Bỏ lọc</button>}
+            {selectedField && <button type="button" onClick={() => setSelectedField(null)} aria-label="Bỏ lọc lĩnh vực" title="Bỏ lọc lĩnh vực" className="flex items-center gap-0.5 text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-1.5 py-1"><X className="w-3 h-3" /> Bỏ lọc</button>}
           </div>
-          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+          <div className="space-y-1.5 max-h-56 overflow-y-auto p-0.5 pr-1">
             {fieldBreakdown.map(([name, count]) => {
-              const pct = statusStats.total > 0 ? (count / statusStats.total) * 100 : 0;
+              const isSelected = selectedField === name;
               return (
-                <button type="button" key={name} onClick={() => setSelectedField(selectedField === name ? null : name)} aria-pressed={selectedField === name}
-                  className={`block w-full text-left space-y-0.5 rounded-lg px-1 py-0.5 transition ${selectedField === name ? 'bg-indigo-100 ring-1 ring-indigo-300' : 'hover:bg-slate-50'}`}>
-                  <div className="flex justify-between text-xs font-medium text-slate-700 gap-2">
-                    <span className="truncate">{name}</span><span className="font-bold shrink-0">{count}</span>
+                <button
+                  type="button"
+                  key={name}
+                  onClick={() => setSelectedField(isSelected ? null : name)}
+                  aria-pressed={isSelected}
+                  className={`block w-full text-left rounded-lg px-2.5 py-1.5 border transition ${
+                    isSelected
+                      ? 'bg-indigo-100/90 border-indigo-400 shadow-2xs'
+                      : 'border-transparent hover:bg-slate-50 hover:border-slate-200'
+                  }`}
+                >
+                  <div className={`flex justify-between text-xs font-medium gap-2 ${isSelected ? 'text-indigo-950 font-semibold' : 'text-slate-700'}`}>
+                    <span className="truncate">{name}</span>
+                    <span className="font-bold shrink-0">{count}</span>
                   </div>
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden"><div className="bg-indigo-600 h-full rounded-full" style={{ width: `${pct}%` }} /></div>
                 </button>
               );
             })}
@@ -264,7 +283,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-xs font-black text-blue-800 break-all">
-                      {d.number}/{d.symbol}
+                      {formatDocCode(d.number, d.symbol)}
                     </span>
                     <span className="text-[10px] text-slate-500">• {displayDate(d.issued)}</span>
                   </div>

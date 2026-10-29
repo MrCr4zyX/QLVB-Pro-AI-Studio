@@ -37,9 +37,9 @@ export interface ImportResult {
 }
 
 /**
- * Export current database state into a PC-compatible .xlsx workbook
+ * Build a PC-compatible .xlsx workbook from current state
  */
-export function exportToExcel(state: AppDataState, filename = 'documents_k02_mobile.xlsx') {
+export function buildExcelWorkbook(state: AppDataState): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
 
   // 1. VAN_BAN
@@ -140,16 +140,44 @@ export function exportToExcel(state: AppDataState, filename = 'documents_k02_mob
   const wsAmend = XLSX.utils.aoa_to_sheet([amendCols, ...amendData]);
   XLSX.utils.book_append_sheet(wb, wsAmend, 'VAN_BAN_SUA_DOI');
 
-  // Trigger browser download
-  XLSX.writeFile(wb, filename);
+  return wb;
 }
 
 /**
- * Import Excel file exported from PC K02 Document Manager
+ * Export current database state into a PC-compatible .xlsx file (downloads to browser or Android Download folder)
  */
-export async function importFromExcel(file: File, currentData: AppDataState, overwrite = false): Promise<ImportResult> {
+export function exportToExcel(state: AppDataState, filename = 'documents.xlsx') {
+  const wb = buildExcelWorkbook(state);
+  const bridge = typeof window !== 'undefined' ? (window as any).AndroidBridge : null;
+  if (bridge && typeof bridge.saveBase64File === 'function') {
+    const base64Data = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+    const saved = bridge.saveBase64File(base64Data, filename);
+    if (saved) return state.documents.length;
+  }
+  XLSX.writeFile(wb, filename);
+  return state.documents.length;
+}
+
+/**
+ * Export current database state into a Blob for cloud sync (Google Drive)
+ */
+export function exportToExcelBlob(state: AppDataState): Blob {
+  const wb = buildExcelWorkbook(state);
+  const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  return new Blob([excelBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+}
+
+/**
+ * Import Excel from an ArrayBuffer (used for both file uploads and Drive downloads)
+ */
+export async function importFromExcelBuffer(
+  arrayBuffer: ArrayBuffer,
+  currentData: AppDataState,
+  overwrite = false
+): Promise<ImportResult> {
   try {
-    const arrayBuffer = await file.arrayBuffer();
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
 
     const requiredSheets = ['VAN_BAN', 'LICH_BAO_CAO', 'LICH_SU'];
@@ -161,7 +189,6 @@ export async function importFromExcel(file: File, currentData: AppDataState, ove
         const firstSheetName = wb.SheetNames[0];
         const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(wb.Sheets[firstSheetName]);
         if (rows.length > 0) {
-          // Attempt smart import from single sheet
           return importSimplifiedSheet(rows, currentData, overwrite);
         }
       }
@@ -353,6 +380,14 @@ export async function importFromExcel(file: File, currentData: AppDataState, ove
       stats: { documents: 0, schedules: 0, reports: 0, documentTypes: 0, workFields: 0 },
     };
   }
+}
+
+/**
+ * Import Excel file uploaded by user (wraps importFromExcelBuffer)
+ */
+export async function importFromExcel(file: File, currentData: AppDataState, overwrite = false): Promise<ImportResult> {
+  const arrayBuffer = await file.arrayBuffer();
+  return importFromExcelBuffer(arrayBuffer, currentData, overwrite);
 }
 
 /**

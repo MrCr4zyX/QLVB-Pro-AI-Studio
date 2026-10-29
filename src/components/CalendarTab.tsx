@@ -143,18 +143,18 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
         </button>
 
         <div className="text-center">
-          <h2 className="text-[14px] sm:text-lg font-bold text-slate-800 tracking-tight leading-tight">
+          <h2 className="text-[13px] sm:text-lg font-bold text-slate-800 tracking-tight leading-tight">
             THÁNG {String(currentMonth).padStart(2, '0')}/{currentYear}
           </h2>
           <span className="text-[11px] text-slate-500 font-medium leading-none block mt-0.5">
-            Lịch hạn báo cáo tổng hợp
+            Lịch báo cáo tổng hợp
           </span>
         </div>
 
         <div className="flex items-center gap-1.5">
           <button
             onClick={goToday}
-            className="text-[15px] font-semibold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition"
+            className="text-[12px] font-semibold px-2 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition"
           >
             Hôm nay
           </button>
@@ -169,7 +169,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
       </div>
 
       {/* Legend - Compact */}
-      <div className="flex items-center justify-center gap-3 text-[13px] font-semibold text-slate-700 flex-wrap py-0">
+      <div className="flex items-center justify-center gap-3 text-[11px] font-semibold text-slate-700 flex-wrap py-0">
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
           Quá hạn
@@ -180,7 +180,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 shrink-0" />
-          8–30 ngày
+          30 ngày
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
@@ -267,11 +267,11 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                   )}
                 </div>
 
-                {/* Status Dot / Mini Badge - Full text without truncation */}
+                {/* Status Dot / Mini Badge - Compact without truncation */}
                 {dayReports.length > 0 && (
                   <div className="flex items-center gap-1 w-full overflow-hidden leading-tight">
                     <span className={`w-2 h-2 rounded-full ${indicatorBg} shrink-0`} />
-                    <span className="text-[11px] font-semibold text-slate-800 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
+                    <span className="text-[9px] font-bold text-slate-800 tracking-tighter whitespace-nowrap overflow-hidden">
                       {hasOverdue ? 'Quá' : hasUrgent ? 'Sắp' : hasCompleted ? 'Xong' : 'Chờ'}
                     </span>
                   </div>

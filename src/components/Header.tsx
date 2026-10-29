@@ -49,8 +49,8 @@ export const Header: React.FC<HeaderProps> = ({
               PRO
               </span>
             </div>
-            <p className="text-[10px] text-blue-200/80 font-medium leading-tight mt-0.5">
-              Quản lý văn bản & Báo cáo
+            <p className="text-[10px] text-blue-200/80 font-medium leading-tight mt-1">
+              QUẢN LÝ VĂN BẢN & BÁO CÁO
             </p>
           </div>
         </div>

@@ -32,6 +32,23 @@ export function displayDate(iso: string | null | undefined): string {
 }
 
 /**
+ * Format document number and symbol without duplicating symbol if number already ends with it
+ */
+export function formatDocCode(number: string | null | undefined, symbol: string | null | undefined): string {
+  const num = (number || '').trim();
+  const sym = (symbol || '').trim();
+  if (!sym) return num;
+  if (!num) return sym;
+  if (
+    num.toLowerCase() === sym.toLowerCase() ||
+    num.toLowerCase().endsWith(`/${sym.toLowerCase()}`)
+  ) {
+    return num;
+  }
+  return `${num}/${sym}`;
+}
+
+/**
  * Format Period label (YYYY -> YYYY, YYYY-MM -> MM/YYYY, YYYY-MM-DD -> DD/MM/YYYY)
  */
 export function periodLabel(iso: string | null | undefined): string {

@@ -11,16 +11,45 @@ import {
   FileDown,
   FileUp,
   RotateCcw,
-  Smartphone,
   Cloud,
   ExternalLink,
-  Copy,
   LogOut,
-  Sparkles,
+  FolderSync,
+  Clock,
+  HardDriveDownload,
+  AlertTriangle,
+  FolderArchive,
+  ArrowDownToLine,
+  Check,
+  KeyRound,
+  Smartphone,
+  Copy,
+  Globe,
 } from 'lucide-react';
-import { AppDataState, exportToExcel, importFromExcel } from '../utils/excelSync';
+import {
+  AppDataState,
+  exportToExcel,
+  exportToExcelBlob,
+  importFromExcel,
+  importFromExcelBuffer,
+} from '../utils/excelSync';
 import { generateInitialData } from '../services/storageService';
-import { googleSignIn, logoutGoogle, uploadApkToDrive, initAuth } from '../services/googleDriveService';
+import { playSuccessChime, playAlertChime, notifyAndroidNative } from '../utils/soundUtils';
+import {
+  googleSignIn,
+  googleSignInRedirect,
+  connectWithExternalToken,
+  generateApkAuthBridgeCode,
+  generateApkDeepLink,
+  WEB_AUTH_PORTAL_URL,
+  logoutGoogle,
+  initAuth,
+  getAccessToken,
+  uploadExcelBackupToDrive,
+  listRecentBackups,
+  downloadBackupFromDrive,
+  DriveBackupFile,
+} from '../services/googleDriveService';
 import type { User } from 'firebase/auth';
 
 interface SyncTabProps {
@@ -30,7 +59,7 @@ interface SyncTabProps {
 
 export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => {
   const [importStatus, setImportStatus] = useState<{
-    type: 'success' | 'error' | null;
+    type: 'success' | 'error' | 'info' | null;
     message: string;
   }>({ type: null, message: '' });
 
@@ -43,23 +72,316 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
   const [user, setUser] = useState<User | null>(null);
   const [isDriveLoading, setIsDriveLoading] = useState(false);
   const [driveStatus, setDriveStatus] = useState<string>('');
-  const [driveApkLink, setDriveApkLink] = useState<string>(() => {
-    return localStorage.getItem('k02_drive_apk_link') || '';
-  });
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [isDirectDownloading, setIsDirectDownloading] = useState(false);
+  const [recentBackups, setRecentBackups] = useState<DriveBackupFile[]>([]);
+  const [isLoadingBackups, setIsLoadingBackups] = useState(false);
+
+  // Restore Modal State
+  const [restoreModalFile, setRestoreModalFile] = useState<DriveBackupFile | null>(null);
+  const [restoreOverwrite, setRestoreOverwrite] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [isDownloadingFileId, setIsDownloadingFileId] = useState<string | null>(null);
+
+  // APK Auth Bridge State
+  const [showTokenInput, setShowTokenInput] = useState(false);
+  const [tokenInputStr, setTokenInputStr] = useState('');
+  const [copiedBridgeCode, setCopiedBridgeCode] = useState(false);
+  const isApkMode = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
+  const isApkAuthPortal =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('apk_auth') === '1';
+
+  // Auto clear status notification after 8 seconds
+  useEffect(() => {
+    if (importStatus.type) {
+      const timer = setTimeout(() => {
+        setImportStatus({ type: null, message: '' });
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [importStatus.type]);
 
   useEffect(() => {
-    const unsubscribe = initAuth((currentUser) => {
+    const consumeNativeDeepLink = async () => {
+      const bridge = (window as any).AndroidBridge;
+      if (bridge && typeof bridge.consumePendingAuthUri === 'function') {
+        const pendingUri = bridge.consumePendingAuthUri();
+        if (pendingUri && typeof pendingUri === 'string' && pendingUri.trim().length > 0) {
+          setIsDriveLoading(true);
+          setDriveStatus('Đang nhận phiên đăng nhập từ trình duyệt Chrome...');
+          try {
+            const res = await connectWithExternalToken(pendingUri);
+            setUser(res.user);
+            setDriveStatus('✓ Đã kết nối Google Drive tự động từ trình duyệt Chrome!');
+            await fetchRecentBackups(res.accessToken);
+          } catch (err: any) {
+            setDriveStatus(`Lỗi nhận liên kết xác thực: ${err.message}`);
+          } finally {
+            setIsDriveLoading(false);
+          }
+        }
+      }
+    };
+
+    const unsubscribe = initAuth((currentUser, token) => {
       setUser(currentUser);
+      if (token) {
+        fetchRecentBackups(token);
+        // If opened in Chrome with ?apk_auth=1, auto-redirect back to APK
+        if (
+          typeof window !== 'undefined' &&
+          new URLSearchParams(window.location.search).get('apk_auth') === '1'
+        ) {
+          const deepLink = generateApkDeepLink(false);
+          if (deepLink) {
+            setTimeout(() => {
+              window.location.href = deepLink;
+            }, 600);
+          }
+        }
+      }
     }, () => {
       setUser(null);
+      setRecentBackups([]);
     });
+
+    consumeNativeDeepLink();
+    const onApkAuthEvent = () => consumeNativeDeepLink();
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        consumeNativeDeepLink();
+      }
+    };
+    window.addEventListener('k02-apk-auth-received', onApkAuthEvent);
+    window.addEventListener('focus', consumeNativeDeepLink);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();
+      window.removeEventListener('k02-apk-auth-received', onApkAuthEvent);
+      window.removeEventListener('focus', consumeNativeDeepLink);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
     };
   }, []);
 
+  const fetchRecentBackups = async (token?: string) => {
+    const activeToken = token || (await getAccessToken());
+    if (!activeToken) return;
+
+    setIsLoadingBackups(true);
+    try {
+      const files = await listRecentBackups(activeToken, (msg) => setDriveStatus(msg));
+      setRecentBackups(files);
+      setDriveStatus(`Đã quét xong thư mục Backup_QLVB_Pro (${files.length} bản sao lưu gần nhất).`);
+    } catch (err: any) {
+      console.error('Fetch backups error:', err);
+      setDriveStatus(`Lỗi tải danh sách sao lưu: ${err.message || 'Vui lòng bấm Cấp quyền lại để quét toàn bộ Drive'}`);
+    } finally {
+      setIsLoadingBackups(false);
+    }
+  };
+
+  const handleConnectDrive = async (forceConsent = false) => {
+    setIsDriveLoading(true);
+    setDriveStatus('Đang mở cửa sổ xác thực Google (Quyền đồng bộ đa thiết bị)...');
+    try {
+      const res = await googleSignIn(forceConsent);
+      setUser(res.user);
+      setDriveStatus('Đã kết nối tài khoản Google thành công!');
+      await fetchRecentBackups(res.accessToken);
+      if (isApkAuthPortal) {
+        const deepLink = generateApkDeepLink(false);
+        if (deepLink) {
+          window.location.href = deepLink;
+        }
+      }
+    } catch (err: any) {
+      setDriveStatus(
+        `Lỗi kết nối: ${err.message || 'Không thể đăng nhập'}. Bạn có thể bấm "Đăng nhập Chuyển hướng" hoặc "Mở Chrome & Kết nối về App" bên dưới.`
+      );
+    } finally {
+      setIsDriveLoading(false);
+    }
+  };
+
+  const handleConnectDriveRedirect = async () => {
+    setIsDriveLoading(true);
+    setDriveStatus('Đang chuyển hướng trực tiếp tới trang đăng nhập Google...');
+    try {
+      await googleSignInRedirect();
+    } catch (err: any) {
+      setDriveStatus(`Lỗi chuyển hướng: ${err.message}`);
+      setIsDriveLoading(false);
+    }
+  };
+
+  const handleOpenChromeLogin = () => {
+    const bridge = (window as any).AndroidBridge;
+    if (bridge && typeof bridge.openExternalBrowser === 'function') {
+      setDriveStatus('Đang mở trình duyệt Chrome... Sau khi đăng nhập Google trên Chrome, ứng dụng sẽ tự động kết nối.');
+      bridge.openExternalBrowser(WEB_AUTH_PORTAL_URL);
+    } else {
+      window.open(WEB_AUTH_PORTAL_URL, '_blank');
+    }
+  };
+
+  const handleConnectWithTokenCode = async () => {
+    if (!tokenInputStr.trim()) return;
+    setIsDriveLoading(true);
+    setDriveStatus('Đang xác thực Mã Kết Nối Google Drive...');
+    try {
+      const res = await connectWithExternalToken(tokenInputStr);
+      setUser(res.user);
+      setTokenInputStr('');
+      setShowTokenInput(false);
+      setDriveStatus('✓ Đã kết nối Google Drive thành công bằng Mã Kết Nối!');
+      await fetchRecentBackups(res.accessToken);
+    } catch (err: any) {
+      setDriveStatus(`Lỗi Mã Kết Nối: ${err.message}`);
+    } finally {
+      setIsDriveLoading(false);
+    }
+  };
+
+  const handleCopyBridgeCode = () => {
+    const code = generateApkAuthBridgeCode();
+    if (!code) return;
+    navigator.clipboard.writeText(code);
+    setCopiedBridgeCode(true);
+    setDriveStatus('✓ Đã sao chép Mã Kết Nối APK vào bộ nhớ tạm! Hãy mở App APK và bấm "Dán Mã Kết Nối".');
+    setTimeout(() => setCopiedBridgeCode(false), 3500);
+  };
+
+  const handleLogoutDrive = async () => {
+    await logoutGoogle();
+    setUser(null);
+    setRecentBackups([]);
+    setDriveStatus('Đã đăng xuất khỏi Google Drive.');
+  };
+
+  // Upload Excel backup with timestamp to Backup_QLVB_Pro folder
+  const handleUploadBackupToDrive = async () => {
+    let token = await getAccessToken();
+    if (!token) {
+      try {
+        const res = await googleSignIn();
+        setUser(res.user);
+        token = res.accessToken;
+      } catch (err: any) {
+        setDriveStatus(`Đăng nhập bị hủy hoặc thất bại: ${err.message}`);
+        return;
+      }
+    }
+
+    setIsDriveLoading(true);
+    setDriveStatus('Đang tạo tệp Excel từ cơ sở dữ liệu hiện tại...');
+    try {
+      const excelBlob = exportToExcelBlob(appState);
+      const uploadedFile = await uploadExcelBackupToDrive(excelBlob, token, (msg) => {
+        setDriveStatus(msg);
+      });
+
+      setImportStatus({
+        type: 'success',
+        message: `Đã sao lưu thành công tệp "${uploadedFile.name}" vào thư mục Backup_QLVB_Pro trên Google Drive!`,
+      });
+      // Refresh list
+      await fetchRecentBackups(token);
+    } catch (err: any) {
+      setDriveStatus(`Lỗi tải lên: ${err.message}`);
+      setImportStatus({
+        type: 'error',
+        message: `Lỗi sao lưu lên Drive: ${err.message}`,
+      });
+    } finally {
+      setIsDriveLoading(false);
+    }
+  };
+
+  // Restore data from a selected Drive backup file
+  const handleConfirmRestore = async () => {
+    if (!restoreModalFile) return;
+
+    const token = await getAccessToken();
+    if (!token) {
+      alert('Phiên đăng nhập Google đã hết hạn. Vui lòng đăng nhập lại.');
+      return;
+    }
+
+    setIsRestoring(true);
+    try {
+      const arrayBuffer = await downloadBackupFromDrive(token, restoreModalFile.id);
+      const result = await importFromExcelBuffer(arrayBuffer, appState, restoreOverwrite);
+
+      if (result.success && result.data) {
+        onUpdateState(result.data);
+        setImportStatus({
+          type: 'success',
+          message: `Khôi phục thành công từ bản sao lưu "${restoreModalFile.name}"! (${result.stats.documents} văn bản, ${result.stats.reports} báo cáo, ${result.stats.schedules} lịch).`,
+        });
+        setRestoreModalFile(null);
+      } else {
+        throw new Error(result.message || 'Không thể xử lý dữ liệu từ tệp');
+      }
+    } catch (err: any) {
+      setImportStatus({
+        type: 'error',
+        message: `Lỗi khôi phục dữ liệu: ${err.message}`,
+      });
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  // Download a Drive backup file directly to local device
+  const handleDownloadDriveFileToDevice = async (file: DriveBackupFile) => {
+    const token = await getAccessToken();
+    if (!token) {
+      alert('Vui lòng kết nối Google Drive để tải tệp.');
+      return;
+    }
+
+    setIsDownloadingFileId(file.id);
+    try {
+      const arrayBuffer = await downloadBackupFromDrive(token, file.id);
+      const bridge = typeof window !== 'undefined' ? (window as any).AndroidBridge : null;
+      if (bridge && typeof bridge.saveBase64File === 'function') {
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Data = window.btoa(binary);
+        bridge.saveBase64File(base64Data, file.name);
+      } else {
+        const blob = new Blob([arrayBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 2000);
+      }
+      setImportStatus({
+        type: 'info',
+        message: `Đã tải bản sao lưu "${file.name}" về thư mục Tải xuống (Download) trên thiết bị.`,
+      });
+    } catch (err: any) {
+      setImportStatus({
+        type: 'error',
+        message: `Lỗi khi tải tệp về máy: ${err.message}`,
+      });
+    } finally {
+      setIsDownloadingFileId(null);
+    }
+  };
+
+  // Local Excel upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -71,6 +393,11 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       const result = await importFromExcel(file, appState, overwriteMode);
       if (result.success && result.data) {
         onUpdateState(result.data);
+        playSuccessChime();
+        notifyAndroidNative(
+          'K02 Mobile - Khôi phục thành công',
+          `Đã nhập ${result.stats.documents} văn bản, ${result.stats.reports} báo cáo từ "${file.name}"`
+        );
         setImportStatus({
           type: 'success',
           message: `Đã nhập thành công từ file Excel "${file.name}"! (${result.stats.documents} văn bản, ${result.stats.reports} báo cáo, ${result.stats.schedules} lịch)`,
@@ -79,6 +406,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         throw new Error(result.message || 'Nhập file không thành công');
       }
     } catch (error: any) {
+      playAlertChime();
       setImportStatus({
         type: 'error',
         message: `Lỗi khi nhập dữ liệu: ${error.message || 'File Excel không đúng định dạng chuẩn K02'}`,
@@ -89,14 +417,25 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     }
   };
 
+  // Local Excel export
   const handleExportExcel = () => {
     try {
-      const count = exportToExcel(appState);
+      const now = new Date();
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const filename = `${timestamp}_documents.xlsx`;
+      const count = exportToExcel(appState, filename);
+      playSuccessChime();
+      notifyAndroidNative(
+        'K02 Mobile - Xuất Excel thành công',
+        `Đã lưu tệp "${filename}" (${count} văn bản)`
+      );
       setImportStatus({
         type: 'success',
-        message: `Đã xuất ${count} văn bản ra file "documents.xlsx" thành công. Bạn có thể sao chép file này vào máy tính để nhập lại vào phần mềm PC.`,
+        message: `Đã xuất ${count} văn bản ra file "${filename}" thành công. Bạn có thể sao chép file này vào máy tính để nhập lại vào phần mềm PC.`,
       });
     } catch (error: any) {
+      playAlertChime();
       setImportStatus({
         type: 'error',
         message: `Lỗi khi xuất dữ liệu: ${error.message}`,
@@ -107,20 +446,49 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
   const handleExportJSON = () => {
     try {
       const jsonStr = JSON.stringify(appState, null, 2);
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `k02_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const filename = `k02_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      const bridge = typeof window !== 'undefined' ? (window as any).AndroidBridge : null;
+      let bridgeSaved = false;
+
+      if (bridge && typeof bridge.saveBase64File === 'function') {
+        try {
+          const bytes = new TextEncoder().encode(jsonStr);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64Data = window.btoa(binary);
+          bridgeSaved = Boolean(bridge.saveBase64File(base64Data, filename));
+        } catch (bridgeErr) {
+          console.warn('Native saveBase64File error, falling back to blob download:', bridgeErr);
+        }
+      }
+
+      if (!bridgeSaved) {
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 2000);
+      }
+
+      playSuccessChime();
+      notifyAndroidNative(
+        'K02 Mobile - Sao lưu JSON thành công',
+        `Đã lưu tệp sao lưu "${filename}"`
+      );
       setImportStatus({
         type: 'success',
-        message: 'Đã xuất file sao lưu JSON thành công.',
+        message: `Đã xuất file sao lưu "${filename}" thành công.`,
       });
     } catch (error: any) {
+      playAlertChime();
       setImportStatus({ type: 'error', message: `Lỗi: ${error.message}` });
     }
   };
@@ -129,6 +497,8 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     if (window.confirm('Bạn có chắc chắn muốn đặt lại dữ liệu mẫu ban đầu? Toàn bộ dữ liệu hiện tại sẽ được thay thế bằng danh mục mẫu chuẩn K02.')) {
       const initial = generateInitialData();
       onUpdateState(initial);
+      playSuccessChime();
+      notifyAndroidNative('K02 Mobile', 'Đã đặt lại dữ liệu mẫu K02 ban đầu');
       setImportStatus({
         type: 'success',
         message: 'Đã đặt lại dữ liệu mẫu K02 ban đầu thành công!',
@@ -161,72 +531,27 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     if (jsonInputRef.current) jsonInputRef.current.value = '';
   };
 
-  // Google Drive Handlers
-  const handleConnectDrive = async () => {
-    setIsDriveLoading(true);
-    setDriveStatus('Đang mở xác thực Google...');
+  const formatFileSize = (bytesStr?: string) => {
+    if (!bytesStr) return '';
+    const bytes = parseInt(bytesStr, 10);
+    if (isNaN(bytes)) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const formatDateTime = (dateStr: string) => {
     try {
-      const res = await googleSignIn();
-      setUser(res.user);
-      setDriveStatus('Đã kết nối tài khoản Google thành công!');
-    } catch (err: any) {
-      setDriveStatus(`Lỗi kết nối: ${err.message || 'Không thể đăng nhập Google'}`);
-    } finally {
-      setIsDriveLoading(false);
-    }
-  };
-
-  const handleLogoutDrive = async () => {
-    await logoutGoogle();
-    setUser(null);
-    setDriveStatus('Đã đăng xuất Google Drive.');
-  };
-
-  const handleUploadToDrive = async () => {
-    if (!user) {
-      await handleConnectDrive();
-      return;
-    }
-    setIsDriveLoading(true);
-    setDriveStatus('Bắt đầu tải lên Google Drive...');
-    try {
-      const result = await uploadApkToDrive((msg) => setDriveStatus(msg));
-      setDriveApkLink(result.webViewLink);
-      setDriveStatus('Tải lên Google Drive thành công! Tệp đã được cấp quyền chia sẻ liên kết.');
-    } catch (err: any) {
-      setDriveStatus(`Lỗi tải lên: ${err.message}`);
-    } finally {
-      setIsDriveLoading(false);
-    }
-  };
-
-  const handleCopyDriveLink = () => {
-    if (!driveApkLink) return;
-    navigator.clipboard.writeText(driveApkLink);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
-  };
-
-  const handleDirectBlobDownload = async () => {
-    setIsDirectDownloading(true);
-    try {
-      const res = await fetch('./k02_mobile_qlvb_1.8.apk');
-      if (!res.ok) throw new Error('Không tìm thấy tệp APK trên máy chủ');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'k02_mobile_qlvb_1.8.apk';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 2000);
-    } catch (err: any) {
-      alert(`Lỗi tải trực tiếp: ${err.message}. Vui lòng dùng liên kết Google Drive.`);
-    } finally {
-      setIsDirectDownloading(false);
+      const d = new Date(dateStr);
+      return d.toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateStr;
     }
   };
 
@@ -235,24 +560,61 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       {/* Title */}
       <div>
         <h2 className="text-base font-bold text-slate-800 tracking-tight flex items-center gap-2">
-          <span>ĐỒNG BỘ DỮ LIỆU & LƯU TRỮ GOOGLE DRIVE</span>
+          <span>ĐỒNG BỘ & SAO LƯU DỮ LIỆU</span>
         </h2>
         <p className="text-xs text-slate-500 font-medium">
-          Trao đổi dữ liệu hai chiều với phần mềm K02 trên Windows và lưu trữ tệp APK lên Google Drive
+          Sao lưu dữ liệu hai chiều với Google Drive (Thư mục <code>Backup_QLVB_Pro</code>) hoặc trao đổi tệp Excel với máy tính PC
         </p>
       </div>
 
-      {/* Status banner */}
+      {/* Floating Status Notification Toast (Always visible regardless of scroll) */}
+      {importStatus.type && (
+        <div
+          className="fixed left-3 right-3 max-w-lg mx-auto z-50 animate-bounce-in shadow-2xl pointer-events-auto"
+          style={{ top: 'max(3.8rem, calc(env(safe-area-inset-top, 0px) + 3.8rem))' }}
+        >
+          <div
+            className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 backdrop-blur-md shadow-2xl ${
+              importStatus.type === 'success'
+                ? 'bg-slate-900/95 border-emerald-400 text-emerald-100'
+                : importStatus.type === 'info'
+                ? 'bg-slate-900/95 border-blue-400 text-blue-100'
+                : 'bg-slate-900/95 border-rose-400 text-rose-100'
+            }`}
+          >
+            {importStatus.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            ) : importStatus.type === 'info' ? (
+              <CheckCircle2 className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 font-semibold leading-relaxed">{importStatus.message}</div>
+            <button
+              onClick={() => setImportStatus({ type: null, message: '' })}
+              className="text-xs font-black p-1 hover:bg-white/20 rounded-lg text-white"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Top Status banner */}
       {importStatus.type && (
         <div
           className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 animate-fadeIn ${
             importStatus.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : importStatus.type === 'info'
+              ? 'bg-blue-50 border-blue-200 text-blue-800'
               : 'bg-rose-50 border-rose-200 text-rose-800'
           }`}
         >
           {importStatus.type === 'success' ? (
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          ) : importStatus.type === 'info' ? (
+            <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
           ) : (
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
           )}
@@ -266,91 +628,150 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         </div>
       )}
 
-      {/* Google Drive Connection & APK Storage Card */}
-      <div className="bg-gradient-to-br from-white to-blue-50/60 rounded-3xl p-4 border-2 border-blue-200/90 shadow-xs space-y-3">
+      {/* Main Google Drive Backup & Sync Card */}
+      <div className="bg-gradient-to-br from-white to-blue-50/60 rounded-3xl p-4 border-2 border-blue-200/90 shadow-xs space-y-3.5">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-bold text-blue-950 flex items-center gap-1.5 uppercase tracking-tight">
             <Cloud className="w-4 h-4 text-blue-600" />
-            <span>KẾT NỐI GOOGLE DRIVE ĐỂ TẢI & LƯU TỆP APK</span>
+            <span>ĐỒNG BỘ GOOGLE DRIVE - THƯ MỤC BACKUP_QLVB_PRO</span>
           </h3>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
-            Ưu tiên Drive
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 flex items-center gap-1">
+            <FolderArchive className="w-3 h-3 text-blue-600" />
+            <span>Drive .xlsx</span>
           </span>
         </div>
 
         <p className="text-xs text-slate-600 leading-relaxed">
-          Lưu trữ tệp tin cài đặt <code>k02_mobile_qlvb_1.8.apk</code> (Tối ưu nhỏ gọn ~2.0 MB) vĩnh viễn trên <strong>Google Drive</strong> của bạn, chia sẻ liên kết trực tiếp cho các đồng chí khác trong đơn vị mà không bao giờ bị hết hạn.
+          Tự động đồng bộ các bản sao lưu Excel <code>YYYYMMDD_HHmmss_documents.xlsx</code> vào thư mục <strong>Backup_QLVB_Pro</strong> trên Google Drive. Bạn có thể chọn khôi phục nhanh ngược về ứng dụng bất cứ lúc nào.
         </p>
 
-        {/* User Auth State */}
+        {/* User Auth Bar */}
         <div className="p-3 bg-white rounded-2xl border border-blue-200/80 space-y-2.5">
           {user ? (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                {user.photoURL ? (
-                  <img src={user.photoURL} alt={user.displayName || ''} className="w-8 h-8 rounded-full border border-blue-300" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center">
-                    {user.email?.charAt(0).toUpperCase()}
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  {user.photoURL ? (
+                    <img src={user.photoURL} alt={user.displayName || ''} className="w-8 h-8 rounded-full border border-blue-300" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center">
+                      {user.email?.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block leading-tight">
+                      {user.displayName || 'Tài khoản Google'}
+                    </span>
+                    <span className="text-[11px] text-slate-500">{user.email}</span>
                   </div>
-                )}
-                <div>
-                  <span className="text-xs font-bold text-slate-800 block leading-tight">
-                    {user.displayName || 'Tài khoản Google'}
-                  </span>
-                  <span className="text-[11px] text-slate-500">{user.email}</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    onClick={() => handleConnectDrive(true)}
+                    disabled={isDriveLoading}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-semibold transition"
+                    title="Cấp quyền đọc tệp từ các thiết bị khác trên Google Drive"
+                  >
+                    <FolderSync className="w-3.5 h-3.5" />
+                    <span>Đồng bộ đa thiết bị</span>
+                  </button>
+                  <button
+                    onClick={handleLogoutDrive}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium transition"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Đăng xuất</span>
+                  </button>
                 </div>
               </div>
 
-              <button
-                onClick={handleLogoutDrive}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium transition"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Đăng xuất</span>
-              </button>
+              {/* Bridge to Android APK when logged in on Web Browser */}
+              {!isApkMode && (
+                <div className="p-2.5 rounded-xl bg-emerald-50/90 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="text-[11px] text-emerald-900">
+                    <span className="font-bold flex items-center gap-1">
+                      <Smartphone className="w-3.5 h-3.5 text-emerald-700" />
+                      Đang dùng App APK trên điện thoại?
+                    </span>
+                    <span>Chuyển trực tiếp phiên đăng nhập Google Drive này vào ứng dụng APK:</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <a
+                      href={generateApkDeepLink(false) || '#'}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-xs transition"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Kết nối vào App APK</span>
+                    </a>
+                    <button
+                      onClick={handleCopyBridgeCode}
+                      className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[11px] flex items-center gap-1 transition"
+                    >
+                      {copiedBridgeCode ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedBridgeCode ? 'Đã chép mã' : 'Copy Mã Kết Nối'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5">
-              <div className="text-xs text-slate-600">
-                Chưa kết nối tài khoản Google. Bấm nút dưới để kết nối:
+            <div className="space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="text-xs text-slate-600">
+                  Chưa kết nối Google Drive. Chọn phương thức đăng nhập để tự động sao lưu & khôi phục dữ liệu:
+                </div>
+                <button
+                  onClick={() => handleConnectDrive(false)}
+                  disabled={isDriveLoading}
+                  className="w-full sm:w-auto justify-center flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 shadow-xs font-bold text-xs transition active:scale-95 disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                  <span>Đăng nhập bằng Google</span>
+                </button>
               </div>
-              <button
-                onClick={handleConnectDrive}
-                disabled={isDriveLoading}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 shadow-xs font-bold text-xs transition active:scale-95 disabled:opacity-50"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-                <span>Đăng nhập bằng Google</span>
-              </button>
+
+              {/* Additional In-App Auth Method */}
+              <div className="pt-1">
+                <button
+                  onClick={handleConnectDriveRedirect}
+                  disabled={isDriveLoading}
+                  className="w-full sm:w-auto justify-center flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 font-bold text-[11px] transition"
+                >
+                  <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>Đăng nhập Tài khoản</span>
+                </button>
+              </div>
             </div>
           )}
 
           {/* Action buttons */}
           <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2">
             <button
-              onClick={handleUploadToDrive}
+              onClick={handleUploadBackupToDrive}
               disabled={isDriveLoading}
-              className="flex-1 min-w-[200px] flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition active:scale-95 disabled:opacity-50"
+              className="flex-1 min-w-[220px] flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition active:scale-95 disabled:opacity-50"
             >
               <Upload className="w-4 h-4" />
-              <span>{isDriveLoading ? 'Đang tải lên Drive...' : 'Tải file APK v1.8 lên Google Drive của tôi'}</span>
+              <span>{isDriveLoading ? 'Đang sao lưu lên Drive...' : 'Sao lưu ngay lên Google Drive (Backup_QLVB_Pro)'}</span>
             </button>
 
-            <button
-              onClick={handleDirectBlobDownload}
-              disabled={isDirectDownloading}
-              className="flex items-center gap-1.5 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition active:scale-95 disabled:opacity-50"
-              title="Tải trực tiếp vào máy tính/điện thoại từ bộ nhớ ứng dụng"
-            >
-              <Download className="w-4 h-4" />
-              <span>{isDirectDownloading ? 'Đang chuẩn bị...' : 'Tải APK v1.8 trực tiếp'}</span>
-            </button>
+            {user && (
+              <button
+                onClick={() => fetchRecentBackups()}
+                disabled={isLoadingBackups}
+                className="flex items-center gap-1.5 py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs shadow-xs transition active:scale-95 disabled:opacity-50"
+                title="Làm mới danh sách tệp sao lưu trên Drive"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingBackups ? 'animate-spin text-blue-600' : ''}`} />
+                <span>Quét lại Drive</span>
+              </button>
+            )}
           </div>
 
           {driveStatus && (
@@ -360,76 +781,224 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
           )}
         </div>
 
-        {/* Drive Link & Custom Input */}
-        <div className="space-y-1.5 pt-1">
-          <label className="text-[11px] font-bold text-slate-700 block">
-            Liên kết Google Drive của tệp APK:
-          </label>
-          <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-blue-200">
-            <input
-              type="text"
-              value={driveApkLink}
-              onChange={(e) => {
-                setDriveApkLink(e.target.value);
-                localStorage.setItem('k02_drive_apk_link', e.target.value);
-              }}
-              placeholder="Dán liên kết Google Drive của đơn vị (vd: https://drive.google.com/...)"
-              className="flex-1 text-[11px] text-slate-700 bg-transparent outline-hidden font-mono truncate"
-            />
-            {driveApkLink && (
-              <>
-                <button
-                  onClick={handleCopyDriveLink}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-[11px] font-semibold shrink-0 transition"
-                >
-                  {copiedLink ? (
-                    <>
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Đã chép</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Chép link</span>
-                    </>
-                  )}
-                </button>
-
-                <a
-                  href={driveApkLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shrink-0 transition"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Mở Drive</span>
-                </a>
-              </>
+        {/* List of 5 Most Recent Excel Backups on Drive */}
+        <div className="space-y-2 pt-1">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+            <span className="flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-blue-600" />
+              <span>5 BẢN SAO LƯU GOOGLE DRIVE GẦN NHẤT</span>
+            </span>
+            {recentBackups.length > 0 && (
+              <span className="text-[11px] text-slate-500 font-normal">
+                {recentBackups.length} bản sao lưu
+              </span>
             )}
           </div>
+
+          {!user ? (
+            <div className="p-3.5 bg-white/70 rounded-2xl border border-dashed border-slate-300 text-center text-xs text-slate-500">
+              Đăng nhập tài khoản Google để xem và khôi phục từ 5 bản sao lưu gần nhất.
+            </div>
+          ) : isLoadingBackups ? (
+            <div className="p-4 bg-white rounded-2xl border border-slate-200 flex items-center justify-center gap-2 text-xs text-slate-500">
+              <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
+              <span>Đang kiểm tra thư mục Backup_QLVB_Pro trên Drive...</span>
+            </div>
+          ) : recentBackups.length === 0 ? (
+            <div className="p-4 bg-white rounded-2xl border border-slate-200 text-center text-xs text-slate-500 space-y-1">
+              <p className="font-medium text-slate-700">Chưa có bản sao lưu nào trong thư mục Backup_QLVB_Pro.</p>
+              <p className="text-[11px]">Bấm nút <strong>"Sao lưu ngay lên Google Drive"</strong> hoặc bấm <strong>"Đồng bộ đa thiết bị"</strong> để cấp quyền quét tệp từ máy khác.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {recentBackups.map((file, idx) => (
+                <div
+                  key={file.id}
+                  className="bg-white p-3 rounded-2xl border border-blue-100 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 hover:border-blue-300 transition"
+                >
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center shrink-0 mt-0.5">
+                      <FileSpreadsheet className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-800 truncate" title={file.name}>
+                          {file.name}
+                        </span>
+                        {idx === 0 && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[9px] font-bold shrink-0">
+                            Mới nhất
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-0.5">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-slate-400" />
+                          {formatDateTime(file.modifiedTime || file.createdTime)}
+                        </span>
+                        {file.size && <span>• {formatFileSize(file.size)}</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions for this backup file */}
+                  <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
+                    {/* Restore button */}
+                    <button
+                      onClick={() => {
+                        setRestoreModalFile(file);
+                        setRestoreOverwrite(false);
+                      }}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition active:scale-95"
+                      title="Khôi phục dữ liệu từ bản sao lưu này"
+                    >
+                      <HardDriveDownload className="w-3.5 h-3.5" />
+                      <span>Khôi phục</span>
+                    </button>
+
+                    {/* Download to device */}
+                    <button
+                      onClick={() => handleDownloadDriveFileToDevice(file)}
+                      disabled={isDownloadingFileId === file.id}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium transition active:scale-95 disabled:opacity-50"
+                      title="Tải tệp Excel này về máy"
+                    >
+                      <ArrowDownToLine className="w-3.5 h-3.5 text-slate-600" />
+                      <span>{isDownloadingFileId === file.id ? 'Đang tải...' : 'Tải về'}</span>
+                    </button>
+
+                    {/* Open link on Google Drive if available */}
+                    {file.webViewLink && (
+                      <a
+                        href={file.webViewLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-blue-600 transition"
+                        title="Mở trên Google Drive"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Main 2-Step Excel Sync Box */}
+      {/* Confirmation Modal for Restore */}
+      {restoreModalFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-3xl p-5 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3 text-amber-600">
+              <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">Xác nhận khôi phục dữ liệu</h3>
+                <p className="text-[11px] text-slate-500">Khôi phục cơ sở dữ liệu từ Google Drive</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1">
+              <div className="font-bold text-slate-800 truncate">
+                Tệp: {restoreModalFile.name}
+              </div>
+              <div className="text-slate-500 text-[11px]">
+                Thời gian sao lưu: {formatDateTime(restoreModalFile.createdTime)} {restoreModalFile.size && `(${formatFileSize(restoreModalFile.size)})`}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-700 block">
+                Phương thức khôi phục:
+              </label>
+              <div className="space-y-2">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="restoreMode"
+                    checked={!restoreOverwrite}
+                    onChange={() => setRestoreOverwrite(false)}
+                    className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div className="text-xs">
+                    <span className="font-bold text-slate-800 block">Nhập gộp & Cập nhật (Khuyên dùng)</span>
+                    <span className="text-[11px] text-slate-500 leading-tight block">
+                      Giữ lại các văn bản mới trên máy chưa có trong bản sao lưu, cập nhật các văn bản trùng khớp.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="restoreMode"
+                    checked={restoreOverwrite}
+                    onChange={() => setRestoreOverwrite(true)}
+                    className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                  />
+                  <div className="text-xs">
+                    <span className="font-bold text-rose-800 block">Ghi đè toàn bộ dữ liệu</span>
+                    <span className="text-[11px] text-slate-500 leading-tight block">
+                      Thay thế hoàn toàn dữ liệu hiện tại trên ứng dụng bằng nội dung của bản sao lưu này.
+                    </span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                onClick={() => setRestoreModalFile(null)}
+                disabled={isRestoring}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={handleConfirmRestore}
+                disabled={isRestoring}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition active:scale-95 disabled:opacity-50"
+              >
+                {isRestoring ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Đang nạp dữ liệu...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Đồng ý khôi phục</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual 2-Step Excel File Box */}
       <div className="bg-white rounded-3xl p-4 border border-slate-200/80 shadow-xs space-y-4">
         {/* Step 1: Import */}
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase tracking-tight">
-            <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">
+            <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] shrink-0">
               1
             </div>
-            <span>Nhập file Excel từ máy tính PC</span>
+            <span>Nhập file khôi phục từ máy tính PC hoặc tệp nội bộ</span>
           </div>
 
-          <div className="pl-7 space-y-2">
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+          <div className="space-y-2.5">
+            <label className="flex items-start gap-2 text-xs font-medium text-slate-700 cursor-pointer">
               <input
                 type="checkbox"
                 checked={overwriteMode}
                 onChange={(e) => setOverwriteMode(e.target.checked)}
-                className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 mt-0.5 shrink-0"
               />
-              <span>Ghi đè toàn bộ dữ liệu (nếu không chọn, hệ thống sẽ nhập gộp và cập nhật)</span>
+              <span className="leading-snug">Ghi đè toàn bộ dữ liệu (nếu không chọn, hệ thống sẽ nhập gộp và cập nhật)</span>
             </label>
 
             <input
@@ -443,10 +1012,10 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isProcessing}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs active:scale-95 transition disabled:opacity-50"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs active:scale-95 transition disabled:opacity-50"
             >
-              <Upload className="w-4 h-4" />
-              <span>{isProcessing ? 'Đang đọc dữ liệu...' : 'Chọn file Excel từ PC (.xlsx)'}</span>
+              <Upload className="w-4 h-4 shrink-0" />
+              <span>{isProcessing ? 'Đang đọc dữ liệu...' : 'Chọn file Excel từ thiết bị (.xlsx)'}</span>
             </button>
           </div>
         </div>
@@ -454,26 +1023,43 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         <hr className="border-slate-100" />
 
         {/* Step 2: Export */}
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase tracking-tight">
-            <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">
+            <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] shrink-0">
               2
             </div>
             <span>Xuất file Excel cho máy tính PC</span>
           </div>
 
-          <div className="pl-7 space-y-2">
-            <p className="text-xs text-slate-500">
-              Xuất toàn bộ {appState.documents.length} văn bản và {appState.reports.length} kỳ báo cáo ra file Excel 9 sheet chuẩn để nhập vào phần mềm PC.
+          <div className="space-y-2.5">
+            <p className="text-xs text-slate-500 leading-relaxed break-words">
+              Xuất toàn bộ {appState.documents.length} văn bản và {appState.reports.length} kỳ báo cáo ra file Excel 9 sheet chuẩn (tự động gắn tiền tố thời gian <code>YYYYMMDD_HHmmss_documents.xlsx</code>) để lưu trữ hoặc nhập vào phần mềm PC.
             </p>
 
             <button
               onClick={handleExportExcel}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs active:scale-95 transition"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs active:scale-95 transition"
             >
-              <Download className="w-4 h-4" />
-              <span>Tải file Excel (documents.xlsx)</span>
+              <Download className="w-4 h-4 shrink-0" />
+              <span>Sao lưu file Excel (.xlsx)</span>
             </button>
+
+            {importStatus.type && (
+              <div
+                className={`p-2.5 rounded-xl border text-xs flex items-center gap-2 animate-fadeIn ${
+                  importStatus.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}
+              >
+                {importStatus.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span className="font-semibold text-[11px] leading-tight">{importStatus.message}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -485,23 +1071,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
           <span>Sao lưu dự phòng & Khôi phục</span>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-          {/* HTML Bundle for PC */}
-          <a
-            href="./k02_web_html.zip"
-            download="k02_web_html.zip"
-            className="p-3 rounded-2xl bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-left space-y-1 transition active:scale-98 flex flex-col justify-between"
-            title="Tải gói mã nguồn HTML/JS/CSS nén để đóng gói .exe hoặc mở trên PC"
-          >
-            <div className="flex items-center gap-1.5 font-bold text-indigo-900 text-xs">
-              <Download className="w-4 h-4 text-indigo-600" />
-              <span>Tải gói HTML/JS (PC)</span>
-            </div>
-            <div className="text-[11px] text-indigo-700/80">
-              Tệp k02_web_html.zip để đóng gói .exe
-            </div>
-          </a>
-
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           {/* JSON Export */}
           <button
             onClick={handleExportJSON}
@@ -547,22 +1117,40 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
               <span>Nạp dữ liệu mẫu</span>
             </div>
             <div className="text-[11px] text-slate-500">
-              Mẫu chuẩn văn bản hành chính K02
+              Mẫu TEST chuẩn văn bản hành chính K02
             </div>
           </button>
         </div>
+
+        {importStatus.type && (
+          <div
+            className={`p-2.5 rounded-xl border text-xs flex items-center gap-2 animate-fadeIn ${
+              importStatus.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-rose-50 border-rose-200 text-rose-800'
+            }`}
+          >
+            {importStatus.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span className="font-semibold text-[11px] leading-tight">{importStatus.message}</span>
+          </div>
+        )}
       </div>
 
       {/* Guide Card */}
       <div className="bg-blue-50/70 rounded-3xl p-4 border border-blue-200 text-xs text-blue-900 space-y-1.5 leading-relaxed">
         <div className="flex items-center gap-1.5 font-bold">
           <HelpCircle className="w-4 h-4 text-blue-600" />
-          <span>Hướng dẫn đồng bộ dữ liệu giữa PC, Google Drive và Android:</span>
+          <span>Hướng dẫn đồng bộ dữ liệu giữa Google Drive, PC và K02 Mobile:</span>
         </div>
         <ul className="list-disc list-inside space-y-1 text-[11px] text-blue-800/90 pl-1">
-          <li><strong>Lưu trữ Google Drive:</strong> Đăng nhập Google Drive ở trên và bấm <em>Tải file APK lên Google Drive của tôi</em> để tạo liên kết tải vĩnh viễn chia sẻ cho các đồng chí khác.</li>
-          <li><strong>Từ PC sang Android:</strong> Trên PC mở <em>Cài đặt ▾ &gt; Sao lưu Excel khôi phục...</em>. Gửi file đó sang điện thoại và bấm <strong>Bước 1</strong> ở trên.</li>
-          <li><strong>Từ Android sang PC:</strong> Bấm <strong>Bước 2</strong> ở trên để tải file <code>documents.xlsx</code>. Chuyển sang PC và mở <em>Cài đặt ▾ &gt; Nhập Excel khôi phục...</em>.</li>
+          <li><strong>Đồng bộ Google Drive:</strong> Khi bấm <em>"Sao lưu ngay lên Google Drive"</em>, hệ thống tự động tìm hoặc tạo thư mục <code>Backup_QLVB_Pro</code> trên Google Drive và lưu trữ file Excel với tên định dạng <code>YYYYMMDD_HHmmss_documents.xlsx</code>.</li>
+          <li><strong>Khôi phục từ Drive:</strong> Bạn có thể xem nhanh danh sách 5 bản sao lưu gần nhất, bấm <strong>"Khôi phục"</strong> và chọn Ghi đè hoặc Nhập gộp để đồng bộ dữ liệu ngược về điện thoại.</li>
+          <li><strong>Từ PC sang Android:</strong> Trên máy tính PC mở <em>Cài đặt ▾ &gt; Sao lưu Excel khôi phục...</em>. Gửi file đó sang điện thoại và chọn nhập ở <strong>Bước 1</strong>.</li>
+          <li><strong>Từ Android sang PC:</strong> Bấm <strong>Bước 2</strong> để tải file Excel, sau đó chuyển file vào máy tính PC và chọn <em>Cài đặt ▾ &gt; Nhập Excel khôi phục...</em>.</li>
         </ul>
       </div>
     </div>

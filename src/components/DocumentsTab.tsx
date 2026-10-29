@@ -17,7 +17,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { EnrichedDocument, DocumentType, WorkField } from '../types';
-import { searchKey, displayDate } from '../utils/dateUtils';
+import { searchKey, displayDate, formatDocCode } from '../utils/dateUtils';
 
 interface DocumentsTabProps {
   documents: EnrichedDocument[];
@@ -104,7 +104,7 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
         )}
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-xl transition ${
+          className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-xl transition shrink-0 ${
             activeFilterCount > 0 || showFilters
               ? 'bg-blue-100 text-blue-700'
               : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -245,52 +245,51 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
             return (
               <div
                 key={doc.id}
-                className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-xs hover:border-blue-300 transition-all space-y-2.5"
+                className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-xs hover:border-blue-300 transition-all space-y-2"
               >
-                {/* Header: Number, Symbol, Badges */}
+                {/* Row 1: Number/Symbol, Status Badges & Next Deadline */}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-black text-blue-900 font-mono tracking-tight">
-                        {doc.number}/{doc.symbol}
+                  <div className="flex items-center gap-1.5 flex-wrap min-w-0 flex-1">
+                    <span className="text-sm font-black text-blue-900 font-mono tracking-tight break-all">
+                      {formatDocCode(doc.number, doc.symbol)}
+                    </span>
+                    {doc.security_level !== 'Thường' && (
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-300 flex items-center gap-0.5 shrink-0">
+                        <Shield className="w-2.5 h-2.5 shrink-0" />
+                        {doc.security_level}
                       </span>
-                      {doc.security_level !== 'Thường' && (
-                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-300 flex items-center gap-0.5">
-                          <Shield className="w-2.5 h-2.5" />
-                          {doc.security_level}
-                        </span>
-                      )}
-                      <span
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${effectBadgeColors}`}
-                      >
-                        {doc.effect_status}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-slate-400" />
-                        {displayDate(doc.issued)}
-                      </span>
-                      <span>•</span>
-                      <span className="flex items-center gap-1 text-slate-700">
-                        <Building2 className="w-3 h-3 text-slate-400" />
-                        {doc.agency}
-                      </span>
-                    </div>
+                    )}
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 whitespace-nowrap ${effectBadgeColors}`}
+                    >
+                      {doc.effect_status}
+                    </span>
                   </div>
 
                   {/* Next Deadline Badge */}
                   <div className="text-right shrink-0">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md inline-block ${nextTagColors}`}>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md inline-block whitespace-nowrap ${nextTagColors}`}>
                       {doc.nextReportLabel}
                     </span>
                     {doc.nextReportDue && (
-                      <div className="text-[10px] text-slate-400 font-medium mt-0.5">
+                      <div className="text-[10px] text-slate-400 font-medium mt-0.5 whitespace-nowrap">
                         Hạn: {doc.nextReportDue}
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* Row 2: Full-width Date & Issuing Agency (prevents narrow vertical text wrapping) */}
+                <div className="flex items-start gap-2 text-xs text-slate-600 font-medium bg-slate-50/90 px-2.5 py-1.5 rounded-xl border border-slate-100">
+                  <span className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap text-slate-500">
+                    <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>{displayDate(doc.issued)}</span>
+                  </span>
+                  <span className="text-slate-300 shrink-0">•</span>
+                  <span className="inline-flex items-start gap-1.5 text-slate-600 font-normal min-w-0 flex-1">
+                    <Building2 className="w-3.5 h-3.5 text-blue-600/80 shrink-0 mt-0.5" />
+                    <span className="leading-snug break-words">{doc.agency || 'Chưa rõ cơ quan'}</span>
+                  </span>
                 </div>
 
                 {/* Summary */}

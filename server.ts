@@ -7,11 +7,22 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.get('/k02_mobile_qlvb_1.8.apk', (req, res) => {
-    const apkPath = path.resolve(process.cwd(), 'public/k02_mobile_qlvb_1.8.apk');
+  app.get('/k02_mobile_qlvb_1.9.apk', (req, res) => {
+    const apkPath = path.resolve(process.cwd(), 'public/k02_mobile_qlvb_1.9.apk');
     if (fs.existsSync(apkPath)) {
       res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-      res.setHeader('Content-Disposition', 'attachment; filename="k02_mobile_qlvb_1.8.apk"');
+      res.setHeader('Content-Disposition', 'attachment; filename="k02_mobile_qlvb_1.9.apk"');
+      fs.createReadStream(apkPath).pipe(res);
+    } else {
+      res.status(404).send('APK file not found');
+    }
+  });
+
+  app.get('/k02_mobile_qlvb_1.8.apk', (req, res) => {
+    const apkPath = path.resolve(process.cwd(), 'public/k02_mobile_qlvb_1.9.apk');
+    if (fs.existsSync(apkPath)) {
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Disposition', 'attachment; filename="k02_mobile_qlvb_1.9.apk"');
       fs.createReadStream(apkPath).pipe(res);
     } else {
       res.status(404).send('APK file not found');

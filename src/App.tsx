@@ -32,7 +32,15 @@ const splashPreviewImage = './app-logo.png';
 
 export default function App() {
   const [appState, setAppState] = useState<AppDataState>(() => loadAppData());
-  const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
+  const [currentTab, setCurrentTab] = useState<TabType>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('apk_auth') === '1' || params.get('tab') === 'sync') {
+        return 'sync';
+      }
+    }
+    return 'dashboard';
+  });
 
   // Modals state
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
@@ -57,6 +65,20 @@ export default function App() {
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
+    const checkPendingApkAuth = () => {
+      const bridge = (window as any).AndroidBridge;
+      if (bridge && typeof bridge.hasPendingAuthUri === 'function' && bridge.hasPendingAuthUri()) {
+        setCurrentTab('sync');
+        window.dispatchEvent(new CustomEvent('k02-apk-auth-received'));
+      }
+    };
+    (window as any).onApkAuthCallback = () => {
+      setCurrentTab('sync');
+      window.dispatchEvent(new CustomEvent('k02-apk-auth-received'));
+    };
+    checkPendingApkAuth();
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);

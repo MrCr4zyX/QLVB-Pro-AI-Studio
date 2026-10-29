@@ -14,7 +14,7 @@ import {
   Check,
 } from 'lucide-react';
 import { EnrichedReport } from '../types';
-import { searchKey } from '../utils/dateUtils';
+import { searchKey, formatDocCode } from '../utils/dateUtils';
 
 interface ReportsTabProps {
   reports: EnrichedReport[];
@@ -194,7 +194,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
                     {/* Header tags */}
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-xs font-bold text-slate-900 font-mono">
-                        {report.number}/{report.symbol}
+                        {formatDocCode(report.number, report.symbol)}
                       </span>
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">
                         {report.kind}
@@ -208,18 +208,18 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
                     <FullTextPopover text={report.summary} className="text-xs text-slate-800 font-medium line-clamp-2 leading-relaxed" />
 
                     {/* Meta */}
-                    <div className="flex items-center gap-3 text-[11px] text-slate-500 font-medium pt-0.5 flex-wrap">
-                      <span className="flex items-center gap-1 text-slate-700">
-                        <CalendarDays className="w-3 h-3 text-slate-400" />
+                    <div className="flex items-center gap-x-2.5 gap-y-0.5 text-[11px] text-slate-500 font-medium pt-0.5 flex-wrap">
+                      <span className="inline-flex items-center gap-1 text-slate-700 shrink-0 whitespace-nowrap">
+                        <CalendarDays className="w-3 h-3 text-slate-400 shrink-0" />
                         Hạn: <strong>{report.displayDue}</strong>
                       </span>
                       {report.completed_date && (
-                        <span className="flex items-center gap-1 text-emerald-700 font-semibold">
-                          <Check className="w-3 h-3" />
+                        <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold shrink-0 whitespace-nowrap">
+                          <Check className="w-3 h-3 shrink-0" />
                           Xong ngày: {report.completed_date}
                         </span>
                       )}
-                      <span className="truncate">{report.agency}</span>
+                      <span className="text-slate-600 font-semibold break-words min-w-0">{report.agency}</span>
                     </div>
 
                     {/* Report result details if entered */}
