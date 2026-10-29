@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <linearGradient id="doc" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f1f5f9" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000" flood-opacity="0.35" />
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  
+  <!-- Outer shield subtle outline -->
+  <path d="M256 60 L410 120 V250 C410 350 256 440 256 440 C256 440 102 350 102 250 V120 Z" 
+        fill="none" stroke="#3b82f6" stroke-width="4" stroke-opacity="0.4" />
+
+  <!-- Document Card -->
+  <g filter="url(#shadow)">
+    <rect x="146" y="110" width="220" height="290" rx="18" fill="url(#doc)" />
+    <!-- Folded corner effect -->
+    <path d="M316 110 L366 160 H326 A10 10 0 0 1 316 150 Z" fill="#cbd5e1" />
+    
+    <!-- Red ribbon banner K02 -->
+    <rect x="170" y="150" width="76" height="28" rx="6" fill="#dc2626" />
+    <text x="208" y="170" fill="#ffffff" font-family="system-ui, sans-serif" font-size="16" font-weight="900" text-anchor="middle" letter-spacing="1">K02</text>
+    
+    <!-- Document lines -->
+    <rect x="170" y="200" width="172" height="10" rx="5" fill="#94a3b8" />
+    <rect x="170" y="224" width="140" height="8" rx="4" fill="#cbd5e1" />
+    <rect x="170" y="244" width="160" height="8" rx="4" fill="#cbd5e1" />
+    <rect x="170" y="264" width="110" height="8" rx="4" fill="#cbd5e1" />
+    
+    <!-- Deadline Clock badge in bottom right of doc -->
+    <circle cx="320" cy="350" r="46" fill="url(#gold)" stroke="#ffffff" stroke-width="6" />
+    <circle cx="320" cy="350" r="38" fill="#1e3a8a" />
+    <!-- Clock hands -->
+    <line x1="320" y1="350" x2="320" y2="326" stroke="#fbbf24" stroke-width="5" stroke-linecap="round" />
+    <line x1="320" y1="350" x2="338" y2="350" stroke="#fbbf24" stroke-width="5" stroke-linecap="round" />
+    <circle cx="320" cy="350" r="4" fill="#fbbf24" />
+  </g>
+</svg>

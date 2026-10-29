@@ -1,0 +1,488 @@
+
+name: Build K02 Mobile APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Lay ma nguon
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # 2. Cai dat Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 3. Cai dat Java
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # 4. Cai dat Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      # 5. Cai dat dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # 6. Kiem tra Capacitor
+      - name: Check Capacitor
+        run: npx cap --version
+
+      # 7. Build React (va don dep file thua truoc khi dua vao APK)
+      - name: Build React app
+        shell: bash
+        run: |
+          npm run build
+          rm -rf dist/*.apk dist/*.zip dist/*.idsig dist/assets/aistudio
+
+      # 8. Tao cau hinh Capacitor neu chua co
+      - name: Configure Capacitor
+        shell: bash
+        run: |
+          if [ ! -f capacitor.config.json ] && \
+             [ ! -f capacitor.config.ts ] && \
+             [ ! -f capacitor.config.js ]; then
+
+            cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "com.k02.qlvbpro",
+            "appName": "K02 QLVB PRO",
+            "webDir": "dist",
+            "server": {
+              "androidScheme": "https"
+            },
+            "plugins": {
+              "SplashScreen": {
+                "launchShowDuration": 400,
+                "launchAutoHide": true,
+                "showSpinner": false,
+                "backgroundColor": "#FFFFFF"
+              },
+              "LocalNotifications": {
+                "smallIcon": "ic_launcher_foreground",
+                "iconColor": "#1E40AF",
+                "sound": "default"
+              }
+            }
+          }
+          EOF
+          fi
+
+          echo "Capacitor configuration ready"
+
+      # 9. Tao va dong bo Android (Cap nhat version 1.8 + Quyen thong bao Status Bar)
+      - name: Prepare Capacitor Android
+        shell: bash
+        run: |
+          if [ ! -f android/gradlew ]; then
+            npx cap add android
+          fi
+
+          if [ -f android/app/build.gradle ]; then
+            sed -i 's/versionCode [0-9]\+/versionCode 18/g' android/app/build.gradle
+            sed -i 's/versionName "[^"]*"/versionName "1.8"/g' android/app/build.gradle
+          fi
+
+          # Dam bao AndroidManifest.xml co day du quyen thong bao Status Bar cho Android 13/14/15
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          manifest_path = Path("android/app/src/main/AndroidManifest.xml")
+          if manifest_path.exists():
+              ANDROID_NS = "http://schemas.android.com/apk/res/android"
+              ET.register_namespace("android", ANDROID_NS)
+              tree = ET.parse(manifest_path)
+              root = tree.getroot()
+              name_attr = f"{{{ANDROID_NS}}}name"
+              existing = {
+                  el.get(name_attr)
+                  for el in root.findall("uses-permission")
+              }
+              required_perms = [
+                  "android.permission.POST_NOTIFICATIONS",
+                  "android.permission.VIBRATE",
+                  "android.permission.RECEIVE_BOOT_COMPLETED",
+                  "android.permission.SCHEDULE_EXACT_ALARM",
+              ]
+              for perm in required_perms:
+                  if perm not in existing:
+                      el = ET.SubElement(root, "uses-permission")
+                      el.set(name_attr, perm)
+              tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
+              print("Updated AndroidManifest.xml notification permissions")
+          PY
+
+          npx cap sync android
+
+      # 10. Kiem tra anh nguon
+      - name: Check Android Assets
+        shell: bash
+        run: |
+          test -f assets/icon.png || {
+            echo "ERROR: Missing assets/icon.png"
+            exit 1
+          }
+
+          test -f assets/splash.png || {
+            echo "ERROR: Missing assets/splash.png"
+            exit 1
+          }
+
+          echo "K02 assets found"
+
+      # 11. Tao tai nguyen Android
+      - name: Generate Android App Assets
+        shell: bash
+        run: |
+          npm install --no-save @capacitor/assets
+
+          npx capacitor-assets generate --android \
+            --iconBackgroundColor '#FFFFFF' \
+            --iconBackgroundColorDark '#FFFFFF' \
+            --splashBackgroundColor '#FFFFFF' \
+            --splashBackgroundColorDark '#FFFFFF'
+
+          echo "Android assets generated"
+
+      # 12. Sua splash va adaptive icon Android 13
+      - name: Fix Android 13 Splash And Icon
+        shell: bash
+        run: |
+          python3 -m pip install --quiet Pillow
+
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          RES = Path("android/app/src/main/res")
+          SOURCE = Image.open("assets/icon.png").convert("RGBA")
+
+          # Thay doi 2 gia tri nay neu can
+          ICON_RATIO = 0.65
+
+          def centered_logo(size, ratio):
+              canvas = Image.new(
+                  "RGBA",
+                  (size, size),
+                  (0, 0, 0, 0)
+              )
+
+              limit = round(size * ratio)
+
+              logo = SOURCE.copy()
+              logo.thumbnail(
+                  (limit, limit),
+                  Image.Resampling.LANCZOS
+              )
+
+              x = (size - logo.width) // 2
+              y = (size - logo.height) // 2
+
+              canvas.alpha_composite(logo, (x, y))
+              return canvas
+
+          # A. Tao icon splash rieng
+          splash_path = (
+              RES / "drawable-nodpi" /
+              "k02_splash_icon.png"
+          )
+
+          splash_path.parent.mkdir(
+              parents=True,
+              exist_ok=True
+          )
+
+          # Transparent native splash icon: Android system launch remains,
+          # but it does not display the masked/rounded K02 logo.
+          Image.new("RGBA", (432, 432), (0, 0, 0, 0)).save(splash_path)
+
+          print("Created splash icon:", splash_path)
+
+          # B. Sua foreground adaptive icon
+          foreground_files = list(
+              RES.glob(
+                  "mipmap-*/ic_launcher_foreground.png"
+              )
+          )
+
+          if not foreground_files:
+              raise RuntimeError(
+                  "Adaptive icon foreground not found"
+              )
+
+          for file in foreground_files:
+              with Image.open(file) as original:
+                  width, height = original.size
+
+              if width != height:
+                  raise RuntimeError(
+                      f"Unexpected icon size: {file}"
+                  )
+
+              centered_logo(
+                  width,
+                  ICON_RATIO
+              ).save(file)
+
+              print("Updated foreground:", file)
+
+          # C. Tao mau nen adaptive icon
+          colors_file = RES / "values" / "colors.xml"
+          colors_file.parent.mkdir(
+              parents=True,
+              exist_ok=True
+          )
+
+          if colors_file.exists():
+              colors_tree = ET.parse(colors_file)
+              colors_root = colors_tree.getroot()
+          else:
+              colors_root = ET.Element("resources")
+              colors_tree = ET.ElementTree(colors_root)
+
+          color = next(
+              (
+                  c for c in colors_root.findall("color")
+                  if c.get("name") == "k02_icon_background"
+              ),
+              None
+          )
+
+          if color is None:
+              color = ET.SubElement(
+                  colors_root,
+                  "color",
+                  {"name": "k02_icon_background"}
+              )
+
+          color.text = "#00000000"
+
+          colors_tree.write(
+              colors_file,
+              encoding="utf-8",
+              xml_declaration=True
+          )
+
+          # D. Sua adaptive icon XML
+          adaptive_files = list(
+              RES.glob(
+                  "mipmap-anydpi*/ic_launcher*.xml"
+              )
+          )
+
+          if not adaptive_files:
+              raise RuntimeError(
+                  "Adaptive icon XML not found"
+              )
+
+          ANDROID_NS = (
+              "http://schemas.android.com/apk/res/android"
+          )
+
+          ET.register_namespace(
+              "android",
+              ANDROID_NS
+          )
+
+          drawable_attr = (
+              "{" + ANDROID_NS + "}drawable"
+          )
+
+          for file in adaptive_files:
+              tree = ET.parse(file)
+              root = tree.getroot()
+
+              background = root.find("background")
+              foreground = root.find("foreground")
+
+              if background is None or foreground is None:
+                  continue
+
+              # Xoa inset cu va cac lop long nhau
+              background.clear()
+              foreground.clear()
+
+              background.set(
+                  drawable_attr,
+                  "@color/k02_icon_background"
+              )
+
+              foreground.set(
+                  drawable_attr,
+                  "@mipmap/ic_launcher_foreground"
+              )
+
+              tree.write(
+                  file,
+                  encoding="utf-8",
+                  xml_declaration=True
+              )
+
+              print("Updated adaptive icon:", file)
+
+          # E. Sua theme SplashScreen
+          style_files = list(
+              RES.glob("values*/styles.xml")
+          )
+
+          found_launch_theme = False
+
+          for file in style_files:
+              tree = ET.parse(file)
+              root = tree.getroot()
+              changed = False
+
+              for style in root.findall("style"):
+                  if style.get("name") != (
+                      "AppTheme.NoActionBarLaunch"
+                  ):
+                      continue
+
+                  found_launch_theme = True
+
+                  # Xoa background bitmap cu
+                  # va cac cau hinh splash trung lap
+                  remove_names = {
+                      "android:background",
+                      "android:windowBackground",
+                      "windowSplashScreenAnimatedIcon",
+                      "windowSplashScreenBackground",
+                      "postSplashScreenTheme",
+                      "android:windowSplashScreenAnimatedIcon",
+                      "android:windowSplashScreenBackground"
+                  }
+
+                  for item in list(style.findall("item")):
+                      if item.get("name") in remove_names:
+                          style.remove(item)
+
+                  settings = {
+                      "windowSplashScreenAnimatedIcon":
+                          "@drawable/k02_splash_icon",
+                      "windowSplashScreenBackground":
+                          "#FFFFFF",
+                      "postSplashScreenTheme":
+                          "@style/AppTheme.NoActionBar"
+                  }
+
+                  for name, value in settings.items():
+                      item = ET.SubElement(
+                          style,
+                          "item",
+                          {"name": name}
+                      )
+                      item.text = value
+
+                  changed = True
+
+              if changed:
+                  tree.write(
+                      file,
+                      encoding="utf-8",
+                      xml_declaration=True
+                  )
+
+                  print("Updated splash theme:", file)
+
+          if not found_launch_theme:
+              raise RuntimeError(
+                  "AppTheme.NoActionBarLaunch not found"
+              )
+
+          print("K02 Android 13 resources updated")
+          PY
+
+      # 13. Kiem tra theme va tai nguyen
+      - name: Inspect Android Resources
+        shell: bash
+        run: |
+          echo "=== Launch theme ==="
+          grep -R -n \
+            "windowSplashScreenAnimatedIcon\|windowSplashScreenBackground\|postSplashScreenTheme" \
+            android/app/src/main/res/values* || true
+
+          echo "=== Splash icon ==="
+          find android/app/src/main/res \
+            -name "k02_splash_icon.png" \
+            -type f
+
+          echo "=== Adaptive icons ==="
+          find android/app/src/main/res \
+            -name "ic_launcher*.xml" \
+            -type f | sort
+
+      # 14. Luu tai nguyen Android de kiem tra
+      - name: Upload Android Resources
+        uses: actions/upload-artifact@v4
+        with:
+          name: K02-Android-Resources
+          path: |
+            android/app/src/main/AndroidManifest.xml
+            android/app/src/main/res/
+          if-no-files-found: error
+          retention-days: 7
+
+      # 15. Kiem tra Gradle
+      - name: Check Gradle
+        shell: bash
+        run: |
+          test -f android/gradlew
+          chmod +x android/gradlew
+
+      # 16. Build Debug APK
+      - name: Build Debug APK
+        working-directory: android
+        shell: bash
+        run: |
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      # 17. Doi ten APK
+      - name: Rename APK
+        shell: bash
+        run: |
+          cp \
+            android/app/build/outputs/apk/debug/app-debug.apk \
+            "K02-QLVB-PRO-${GITHUB_RUN_NUMBER}.apk"
+
+      # 18. Upload APK
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: K02-QLVB-PRO-APK
+          path: K02-QLVB-PRO-*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # 19. Phat hanh GitHub Releases
+      - name: Publish APK to GitHub Releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="build-${GITHUB_RUN_NUMBER}"
+
+          gh release create "$TAG" \
+            "K02-QLVB-PRO-${GITHUB_RUN_NUMBER}.apk" \
+            --title "K02 QLVB PRO - Build ${GITHUB_RUN_NUMBER}" \
+            --notes "APK tu dong dong goi bang GitHub Actions." \
+            --prerelease \
+            --target "$GITHUB_SHA"

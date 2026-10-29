@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>K02 Mobile QLVB PRO</title>
+    <meta name="description" content="Phần mềm Quản lý văn bản và Theo dõi thời hạn báo cáo K02 trên Android / Mobile, đồng bộ file Excel hai chiều với phần mềm PC." />
+    <meta property="og:title" content="K02 Mobile QLVB PRO" />
+    <meta property="og:description" content="Phần mềm Quản lý văn bản và Theo dõi thời hạn báo cáo K02 trên Android / Mobile, đồng bộ file Excel hai chiều với phần mềm PC." />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#1e40af" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="K02 QLVB PRO" />
+    <link rel="icon" type="image/png" href="./pwa-192x192.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+  </head>
+  <body class="bg-white">
+    <!-- One startup splash, outside #root so React cannot replace it prematurely -->
+    <div id="k02-startup-splash" style="position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#fff;user-select:none;opacity:1;">
+      <img src="./app-logo.png" alt="K02 Splash" style="width:260px;height:260px;max-width:85vw;max-height:60dvh;object-fit:contain;flex-shrink:0;display:block;" />
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

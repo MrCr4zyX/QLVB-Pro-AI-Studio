@@ -1,0 +1,70 @@
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
+
+export default defineConfig(() => {
+  return {
+    base: './',
+    plugins: [
+      react(),
+      tailwindcss(),
+      VitePWA({
+        registerType: 'autoUpdate',
+        injectRegister: 'auto',
+        includeAssets: ['favicon.ico', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png', 'sw-notification.js'],
+        manifest: {
+          id: './',
+          name: 'K02 Mobile QLVB',
+          short_name: 'K02 QLVB',
+          description: 'Quản lý văn bản, theo dõi thời hạn báo cáo và đồng bộ Excel với bản PC',
+          theme_color: '#1e40af',
+          background_color: '#f8fafc',
+          display: 'standalone',
+          orientation: 'portrait-primary',
+          start_url: './',
+          scope: './',
+          icons: [
+            {
+              src: './pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: './pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: './pwa-maskable-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
+            },
+          ],
+        },
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
+          importScripts: ['./sw-notification.js'],
+        },
+        devOptions: {
+          enabled: true,
+          type: 'module',
+        },
+      }),
+    ],
+    resolve: {
+      alias: {
+        '@': path.resolve(import.meta.dirname, '.'),
+      },
+    },
+    server: {
+      host: '0.0.0.0',
+      port: 3000,
+      hmr: false,
+    },
+  };
+});

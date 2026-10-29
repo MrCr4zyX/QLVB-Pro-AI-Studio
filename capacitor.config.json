@@ -1,0 +1,21 @@
+{
+  "appId": "com.k02.qlvbpro",
+  "appName": "QLVB PRO",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0,
+      "launchAutoHide": true,
+      "showSpinner": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_launcher_foreground",
+      "iconColor": "#1E40AF",
+      "sound": "default"
+    }
+  }
+}

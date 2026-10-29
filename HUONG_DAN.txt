@@ -1,0 +1,15 @@
+K02 - KHOI PHUC SPLASH HTML (LOGO NGUYEN VEN)
+
+Ghi de 3 file vao thu muc goc repository:
+  index.html
+  src/main.tsx
+  .github/workflows/build-apk.yml
+
+Giu nguyen public/app-logo.png (logo HTML), assets/icon.png (icon app), App.tsx va index.css.
+
+Splash Android native: icon trong suot, nen trang (Android 12+ van co man hinh khoi dong he thong rat ngan).
+Splash HTML: logo app-logo.png khong bi Android cat tron, giu 2000ms + fade 500ms.
+Neu can thay nen HTML: sua background:#fff trong index.html.
+
+GitHub Desktop: Commit to main -> Push origin -> Actions -> Run workflow.
+Chua kiem tra APK tren dien thoai.

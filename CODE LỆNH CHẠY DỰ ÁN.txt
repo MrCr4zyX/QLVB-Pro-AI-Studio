@@ -1,0 +1,74 @@
+Để khởi động lại kết nối xem trước K02 Mobile trên điện thoại, bạn chỉ cần restart Vite trên máy tính. Không cần cài lại Node.js hay npm.
+1. Dừng Vite đang chạy
+Trong Terminal của VS Code hoặc Google Antigravity, nhấn:
+
+Ctrl + C
+
+Nếu xuất hiện Terminate batch job (Y/N)?, nhập Y rồi Enter.
+2. Khởi động lại Vite
+Mở PowerShell tại thư mục dự án và chạy:
+cd "D:\Python\Smart QLVB Giao diện HTML APK"
+npm.cmd run dev -- --host 0.0.0.0
+
+
+Nếu chạy thành công, sẽ xuất hiện:
+VITE ready
+
+➜ Local:   http://localhost:3000/
+➜ Network: http://192.168.1.4:3000/
+
+
+3. Kết nối lại điện thoại
+Đảm bảo điện thoại và máy tính dùng chung Wi-Fi.
+
+Trên Chrome Android, mở:
+
+**http://192.168.1.4:3000/**
+
+Lưu ý: Địa chỉ IP của máy tính có thể thay đổi sau khi kết nối lại Wi-Fi. Hãy dùng địa chỉ Network mới được Vite hiển thị.
+4. Nếu vẫn không kết nối được
+Kiểm tra địa chỉ IP máy tính:
+ipconfig
+
+
+Kiểm tra cổng 3000:
+Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue
+
+
+Nếu Vite báo cổng 3000 đã được sử dụng hoặc chuyển sang cổng 3001, bạn có thể dừng tiến trình đang chiếm cổng 3000:
+Get-NetTCPConnection -LocalPort 3000 -State Listen |
+    Select-Object -ExpandProperty OwningProcess -Unique
+
+
+Sau khi xác định đúng PID của Vite, dùng:
+Stop-Process -Id <PID> -Force
+
+
+Thay <PID> bằng số tiến trình thực tế.
+
+Sau đó chạy lại npm.cmd run dev.
+
+Cách nhanh nhất cho lần sau
+Bạn có thể dùng một lệnh để khởi động Vite tại đúng thư mục:
+cd "D:\Python\Smart QLVB Giao diện HTML APK"; npm.cmd run dev -- --host 0.0.0.0
+
+
+Mở webview
+
+Bước 2. Mở WebView trong VS Code
+1. Nhấn Ctrl + Shift + P.
+2. Gõ Simple Browser: Show.
+3. Nhấn Enter.
+4. Nhập địa chỉ:
+http://localhost:3000
+
+
+5. Nhấn Enter.
+
+npm.cmd run build
+npm.cmd run dev
+
+npm.cmd run build
+git add index.html src/main.tsx .github/workflows/build-apk.yml
+git commit -m "Fix duplicate Android splash screen"
+git push origin main
