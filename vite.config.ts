@@ -6,7 +6,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
-    base: './',
+    base: process.env.GITHUB_PAGES === 'true'
+  ? '/QLVB-Pro-AI-Studio/'
+  : '/',
     plugins: [
       react(),
       tailwindcss(),
