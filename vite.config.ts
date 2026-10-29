@@ -53,7 +53,7 @@ export default defineConfig(() => {
           importScripts: ['./sw-notification.js'],
         },
         devOptions: {
-          enabled: true,
+          enabled: false,
           type: 'module',
         },
       }),
