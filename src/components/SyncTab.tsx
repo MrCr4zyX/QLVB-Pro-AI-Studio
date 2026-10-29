@@ -222,7 +222,11 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
 
   const fetchRecentBackups = async (token?: string) => {
     const activeToken = token || (await getAccessToken());
-    if (!activeToken) return;
+    if (!activeToken) {
+      setUser(null);
+      setRecentBackups([]);
+      return;
+    }
 
     setIsLoadingBackups(true);
     try {
@@ -231,7 +235,17 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       setDriveStatus(`Đã quét xong thư mục Backup_QLVB_Pro (${files.length} bản sao lưu gần nhất).`);
     } catch (err: any) {
       console.error('Fetch backups error:', err);
-      setDriveStatus(`Lỗi tải danh sách sao lưu: ${err.message || 'Vui lòng bấm Cấp quyền lại để quét toàn bộ Drive'}`);
+      if (err?.isAuthError || String(err?.message || '').includes('401')) {
+        setUser(null);
+        setRecentBackups([]);
+        setDriveStatus(
+          'Phiên kết nối Google Drive đã hết hạn (sau 60 phút). Vui lòng bấm "Đăng nhập bằng Google" để làm mới kết nối.'
+        );
+      } else {
+        setDriveStatus(
+          `Lỗi tải danh sách sao lưu: ${err.message || 'Vui lòng bấm Cấp quyền lại để quét toàn bộ Drive'}`
+        );
+      }
     } finally {
       setIsLoadingBackups(false);
     }
@@ -294,12 +308,28 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     }
   };
 
-  const handleCopyBridgeCode = () => {
+  const handleCopyBridgeCode = async () => {
+    let token = await getAccessToken();
+    if (!token) {
+      try {
+        setIsDriveLoading(true);
+        setDriveStatus('Phiên đã hết hạn, đang làm mới mã xác thực trước khi sao chép...');
+        const res = await googleSignIn(false);
+        setUser(res.user);
+        token = res.accessToken;
+      } catch (err: any) {
+        setUser(null);
+        setDriveStatus(`Vui lòng đăng nhập lại để lấy Mã Kết Nối mới: ${err.message}`);
+        return;
+      } finally {
+        setIsDriveLoading(false);
+      }
+    }
     const code = generateApkAuthBridgeCode();
     if (!code) return;
     navigator.clipboard.writeText(code);
     setCopiedBridgeCode(true);
-    setDriveStatus('✓ Đã sao chép Mã Kết Nối vào bộ nhớ tạm! Hãy mở App/PWA và bấm "Nhập Mã Kết Nối".');
+    setDriveStatus('✓ Đã sao chép Mã Kết Nối mới vào bộ nhớ tạm! Hãy mở App/PWA và bấm "Nhập Mã Kết Nối".');
     setTimeout(() => setCopiedBridgeCode(false), 3500);
   };
 
@@ -319,6 +349,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         setUser(res.user);
         token = res.accessToken;
       } catch (err: any) {
+        setUser(null);
         setDriveStatus(`Đăng nhập bị hủy hoặc thất bại: ${err.message}`);
         return;
       }
@@ -328,9 +359,24 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     setDriveStatus('Đang tạo tệp Excel từ cơ sở dữ liệu hiện tại...');
     try {
       const excelBlob = exportToExcelBlob(appState);
-      const uploadedFile = await uploadExcelBackupToDrive(excelBlob, token, (msg) => {
-        setDriveStatus(msg);
-      });
+      let uploadedFile: DriveBackupFile;
+      try {
+        uploadedFile = await uploadExcelBackupToDrive(excelBlob, token, (msg) => {
+          setDriveStatus(msg);
+        });
+      } catch (firstErr: any) {
+        if (firstErr?.isAuthError || String(firstErr?.message || '').includes('401')) {
+          setDriveStatus('Phiên Google Drive đã hết hạn, đang làm mới xác thực...');
+          const freshAuth = await googleSignIn(false);
+          setUser(freshAuth.user);
+          token = freshAuth.accessToken;
+          uploadedFile = await uploadExcelBackupToDrive(excelBlob, token, (msg) => {
+            setDriveStatus(msg);
+          });
+        } else {
+          throw firstErr;
+        }
+      }
 
       setImportStatus({
         type: 'success',
@@ -339,6 +385,9 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       // Refresh list
       await fetchRecentBackups(token);
     } catch (err: any) {
+      if (err?.isAuthError) {
+        setUser(null);
+      }
       setDriveStatus(`Lỗi tải lên: ${err.message}`);
       setImportStatus({
         type: 'error',
@@ -353,15 +402,38 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
   const handleConfirmRestore = async () => {
     if (!restoreModalFile) return;
 
-    const token = await getAccessToken();
+    let token = await getAccessToken();
     if (!token) {
-      alert('Phiên đăng nhập Google đã hết hạn. Vui lòng đăng nhập lại.');
-      return;
+      try {
+        const freshAuth = await googleSignIn(false);
+        setUser(freshAuth.user);
+        token = freshAuth.accessToken;
+      } catch (err: any) {
+        setUser(null);
+        setImportStatus({
+          type: 'error',
+          message: `Phiên đăng nhập Google đã hết hạn. Vui lòng đăng nhập lại: ${err.message}`,
+        });
+        return;
+      }
     }
 
     setIsRestoring(true);
     try {
-      const arrayBuffer = await downloadBackupFromDrive(token, restoreModalFile.id);
+      let arrayBuffer: ArrayBuffer;
+      try {
+        arrayBuffer = await downloadBackupFromDrive(token, restoreModalFile.id);
+      } catch (firstErr: any) {
+        if (firstErr?.isAuthError) {
+          const freshAuth = await googleSignIn(false);
+          setUser(freshAuth.user);
+          token = freshAuth.accessToken;
+          arrayBuffer = await downloadBackupFromDrive(token, restoreModalFile.id);
+        } else {
+          throw firstErr;
+        }
+      }
+
       const result = await importFromExcelBuffer(arrayBuffer, appState, restoreOverwrite);
 
       if (result.success && result.data) {
@@ -375,6 +447,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         throw new Error(result.message || 'Không thể xử lý dữ liệu từ tệp');
       }
     } catch (err: any) {
+      if (err?.isAuthError) setUser(null);
       setImportStatus({
         type: 'error',
         message: `Lỗi khôi phục dữ liệu: ${err.message}`,
@@ -386,15 +459,38 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
 
   // Download a Drive backup file directly to local device
   const handleDownloadDriveFileToDevice = async (file: DriveBackupFile) => {
-    const token = await getAccessToken();
+    let token = await getAccessToken();
     if (!token) {
-      alert('Vui lòng kết nối Google Drive để tải tệp.');
-      return;
+      try {
+        const freshAuth = await googleSignIn(false);
+        setUser(freshAuth.user);
+        token = freshAuth.accessToken;
+      } catch (err: any) {
+        setUser(null);
+        setImportStatus({
+          type: 'error',
+          message: `Vui lòng đăng nhập lại Google Drive để tải tệp: ${err.message}`,
+        });
+        return;
+      }
     }
 
     setIsDownloadingFileId(file.id);
     try {
-      const arrayBuffer = await downloadBackupFromDrive(token, file.id);
+      let arrayBuffer: ArrayBuffer;
+      try {
+        arrayBuffer = await downloadBackupFromDrive(token, file.id);
+      } catch (firstErr: any) {
+        if (firstErr?.isAuthError) {
+          const freshAuth = await googleSignIn(false);
+          setUser(freshAuth.user);
+          token = freshAuth.accessToken;
+          arrayBuffer = await downloadBackupFromDrive(token, file.id);
+        } else {
+          throw firstErr;
+        }
+      }
+
       const bridge = typeof window !== 'undefined' ? (window as any).AndroidBridge : null;
       if (bridge && typeof bridge.saveBase64File === 'function') {
         const bytes = new Uint8Array(arrayBuffer);
@@ -424,6 +520,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         message: `Đã tải bản sao lưu "${file.name}" về thư mục Tải xuống (Download) trên thiết bị.`,
       });
     } catch (err: any) {
+      if (err?.isAuthError) setUser(null);
       setImportStatus({
         type: 'error',
         message: `Lỗi khi tải tệp về máy: ${err.message}`,

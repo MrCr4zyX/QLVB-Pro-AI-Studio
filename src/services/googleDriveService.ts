@@ -16,6 +16,7 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
 const TOKEN_STORAGE_KEY = 'k02_gdrive_access_token';
+const TOKEN_EXPIRY_KEY = 'k02_gdrive_token_expiry';
 const ID_TOKEN_STORAGE_KEY = 'k02_gdrive_id_token';
 const USER_FALLBACK_KEY = 'k02_gdrive_user_profile';
 const SCOPE_VERSION_KEY = 'k02_gdrive_scope_v2';
@@ -38,12 +39,19 @@ let cachedIdToken: string | null =
     ? localStorage.getItem(ID_TOKEN_STORAGE_KEY)
     : null;
 
-function saveTokens(accessToken: string, idToken?: string | null, profile?: { email?: string | null; displayName?: string | null; photoURL?: string | null }) {
+function saveTokens(
+  accessToken: string,
+  idToken?: string | null,
+  profile?: { email?: string | null; displayName?: string | null; photoURL?: string | null },
+  expiresInSec = 3500
+) {
   cachedAccessToken = accessToken;
   if (idToken) cachedIdToken = idToken;
   if (typeof window !== 'undefined') {
+    const expiryMs = Date.now() + expiresInSec * 1000;
     localStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
     sessionStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
+    localStorage.setItem(TOKEN_EXPIRY_KEY, String(expiryMs));
     localStorage.setItem(SCOPE_VERSION_KEY, 'true');
     if (idToken) {
       localStorage.setItem(ID_TOKEN_STORAGE_KEY, idToken);
@@ -51,6 +59,49 @@ function saveTokens(accessToken: string, idToken?: string | null, profile?: { em
     if (profile) {
       localStorage.setItem(USER_FALLBACK_KEY, JSON.stringify(profile));
     }
+  }
+}
+
+export function clearExpiredAccessToken() {
+  cachedAccessToken = null;
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  }
+}
+
+export function isStoredTokenExpired(): boolean {
+  if (!cachedAccessToken) return true;
+  if (typeof window === 'undefined') return false;
+  const rawExpiry = localStorage.getItem(TOKEN_EXPIRY_KEY);
+  if (!rawExpiry) return true;
+  const expiryMs = Number(rawExpiry);
+  return !Number.isFinite(expiryMs) || Date.now() >= expiryMs;
+}
+
+export async function verifyAndRefreshTokenExpiry(token: string): Promise<boolean> {
+  if (!token) return false;
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`,
+      { cache: 'no-store' }
+    );
+    if (!res.ok) {
+      return false;
+    }
+    const data = await res.json();
+    const expiresIn = Number(data?.expires_in || 0);
+    if (expiresIn <= 30) {
+      return false;
+    }
+    if (typeof window !== 'undefined') {
+      const expiryMs = Date.now() + (expiresIn - 30) * 1000;
+      localStorage.setItem(TOKEN_EXPIRY_KEY, String(expiryMs));
+    }
+    return true;
+  } catch {
+    return !isStoredTokenExpired();
   }
 }
 
@@ -99,6 +150,15 @@ export const initAuth = (
 
   return onAuthStateChanged(auth, async (user: User | null) => {
     const hasV2Scope = typeof window !== 'undefined' && localStorage.getItem(SCOPE_VERSION_KEY) === 'true';
+    if (cachedAccessToken) {
+      const isValid = await verifyAndRefreshTokenExpiry(cachedAccessToken);
+      if (!isValid) {
+        clearExpiredAccessToken();
+        if (onAuthFailure) onAuthFailure();
+        return;
+      }
+    }
+
     if (user && cachedAccessToken && hasV2Scope) {
       if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
     } else if (!user && cachedAccessToken) {
@@ -107,11 +167,7 @@ export const initAuth = (
         onAuthSuccess(fallbackUser, cachedAccessToken);
       }
     } else if (!isSigningIn) {
-      cachedAccessToken = null;
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-        localStorage.removeItem(TOKEN_STORAGE_KEY);
-      }
+      clearExpiredAccessToken();
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -350,6 +406,13 @@ export const connectWithExternalToken = async (
     throw new Error('Không tìm thấy Access Token hợp lệ trong mã kết nối.');
   }
 
+  const isValidToken = await verifyAndRefreshTokenExpiry(accessToken);
+  if (!isValidToken) {
+    throw new Error(
+      'Mã Kết Nối này đã hết hạn (mã OAuth2 chỉ có hiệu lực 60 phút). Vui lòng mở lại Cổng Xác Thực Web, bấm Đăng nhập lại rồi sao chép Mã Kết Nối mới.'
+    );
+  }
+
   // Verify token against Google UserInfo or Drive About API
   try {
     const infoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -380,26 +443,41 @@ export const connectWithExternalToken = async (
     displayName: firebaseUser?.displayName || displayName || 'Tài khoản Google',
     photoURL: firebaseUser?.photoURL || photoURL || null,
   });
+  await verifyAndRefreshTokenExpiry(accessToken);
 
   const finalUser = firebaseUser || getSavedUserProfile()!;
   return { user: finalUser, accessToken };
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
+  if (!cachedAccessToken || isStoredTokenExpired()) {
+    clearExpiredAccessToken();
+    return null;
+  }
   return cachedAccessToken;
 };
 
 export const logoutGoogle = async () => {
   await signOut(auth);
-  cachedAccessToken = null;
+  clearExpiredAccessToken();
   cachedIdToken = null;
   if (typeof window !== 'undefined') {
-    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
     localStorage.removeItem(ID_TOKEN_STORAGE_KEY);
     localStorage.removeItem(USER_FALLBACK_KEY);
   }
 };
+
+function throwDriveApiError(prefix: string, status: number, errText: string): never {
+  if (status === 401 || errText.includes('"UNAUTHENTICATED"') || errText.includes('Invalid Credentials')) {
+    clearExpiredAccessToken();
+    const authErr = new Error(
+      'Phiên xác thực Google Drive đã hết hạn (mã truy cập OAuth2 có hiệu lực 60 phút). Vui lòng đăng nhập lại để làm mới kết nối.'
+    );
+    (authErr as any).isAuthError = true;
+    throw authErr;
+  }
+  throw new Error(`${prefix}: ${errText}`);
+}
 
 export interface DriveBackupFile {
   id: string;
@@ -438,7 +516,7 @@ export async function getBackupFolderIds(token: string): Promise<string[]> {
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Lỗi kiểm tra thư mục ${BACKUP_FOLDER_NAME}: ${errText}`);
+    throwDriveApiError(`Lỗi kiểm tra thư mục ${BACKUP_FOLDER_NAME}`, res.status, errText);
   }
 
   const data = await res.json();
@@ -462,7 +540,7 @@ export async function getBackupFolderIds(token: string): Promise<string[]> {
 
   if (!createRes.ok) {
     const errText = await createRes.text();
-    throw new Error(`Lỗi tạo thư mục ${BACKUP_FOLDER_NAME}: ${errText}`);
+    throwDriveApiError(`Lỗi tạo thư mục ${BACKUP_FOLDER_NAME}`, createRes.status, errText);
   }
 
   const newFolder = await createRes.json();
@@ -530,7 +608,7 @@ export async function uploadExcelBackupToDrive(
 
   if (!uploadRes.ok) {
     const errText = await uploadRes.text();
-    throw new Error(`Lỗi tải tệp lên Google Drive: ${errText}`);
+    throwDriveApiError('Lỗi tải tệp lên Google Drive', uploadRes.status, errText);
   }
 
   const uploadedFile: DriveBackupFile = await uploadRes.json();
@@ -565,7 +643,7 @@ export async function listRecentBackups(
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Lỗi lấy danh sách bản sao lưu: ${errText}`);
+    throwDriveApiError('Lỗi lấy danh sách bản sao lưu', res.status, errText);
   }
 
   const data = await res.json();
@@ -587,6 +665,11 @@ export async function downloadBackupFromDrive(
     }
   );
 
+  if (!metaRes.ok && metaRes.status === 401) {
+    const errText = await metaRes.text();
+    throwDriveApiError('Lỗi kiểm tra tệp trên Google Drive', metaRes.status, errText);
+  }
+
   if (metaRes.ok) {
     const meta = await metaRes.json();
     if (meta.mimeType === 'application/vnd.google-apps.spreadsheet') {
@@ -599,7 +682,7 @@ export async function downloadBackupFromDrive(
       );
       if (!exportRes.ok) {
         const errText = await exportRes.text();
-        throw new Error(`Lỗi xuất tệp Google Sheets: ${errText}`);
+        throwDriveApiError('Lỗi xuất tệp Google Sheets', exportRes.status, errText);
       }
       return await exportRes.arrayBuffer();
     }
@@ -615,7 +698,7 @@ export async function downloadBackupFromDrive(
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Lỗi tải tệp từ Google Drive: ${errText}`);
+    throwDriveApiError('Lỗi tải tệp từ Google Drive', res.status, errText);
   }
 
   return await res.arrayBuffer();
@@ -629,7 +712,7 @@ export async function uploadApkToDrive(
 ): Promise<DriveUploadResult> {
   const token = await getAccessToken();
   if (!token) {
-    throw new Error('Chưa đăng nhập Google Drive. Vui lòng kết nối tài khoản Google trước.');
+    throw new Error('Chưa đăng nhập Google Drive hoặc phiên đã hết hạn. Vui lòng kết nối lại tài khoản Google.');
   }
 
   if (onStatusUpdate) onStatusUpdate('Đang tải tệp APK từ bộ nhớ ứng dụng...');
@@ -678,7 +761,7 @@ export async function uploadApkToDrive(
 
   if (!uploadRes.ok) {
     const errText = await uploadRes.text();
-    throw new Error(`Lỗi tải lên Google Drive: ${uploadRes.status} ${errText}`);
+    throwDriveApiError('Lỗi tải lên Google Drive', uploadRes.status, errText);
   }
 
   const fileData = await uploadRes.json();
