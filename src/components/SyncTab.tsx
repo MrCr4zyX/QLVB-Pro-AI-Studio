@@ -823,31 +823,31 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
               </div>
 
               {showTokenInput && (
-                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 animate-fadeIn">
-                  <div className="flex items-center justify-between gap-2">
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 animate-fadeIn w-full max-w-full overflow-hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
                     <span className="text-[11px] font-semibold text-slate-700">
                       Dán Mã Kết Nối từ cổng xác thực Web:
                     </span>
                     <button
                       onClick={handleOpenChromeLogin}
-                      className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1"
+                      className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1 shrink-0"
                     >
-                      <ExternalLink className="w-3 h-3" />
+                      <ExternalLink className="w-3 h-3 shrink-0" />
                       <span>Mở Cổng Xác Thực Lấy Mã</span>
                     </button>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full min-w-0">
                     <input
                       type="text"
                       value={tokenInputStr}
                       onChange={(e) => setTokenInputStr(e.target.value)}
                       placeholder="Dán Mã Kết Nối (Base64 hoặc URL) vào đây..."
-                      className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full min-w-0 sm:flex-1 px-3 py-2 rounded-xl border border-slate-300 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     <button
                       onClick={handleConnectWithTokenCode}
                       disabled={isDriveLoading || !tokenInputStr.trim()}
-                      className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition disabled:opacity-50"
+                      className="w-full sm:w-auto shrink-0 flex items-center justify-center px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition disabled:opacity-50"
                     >
                       Kết nối
                     </button>
