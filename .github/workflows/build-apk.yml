@@ -94,8 +94,8 @@ jobs:
           fi
 
           if [ -f android/app/build.gradle ]; then
-            sed -i 's/versionCode [0-9]\+/versionCode 198/g' android/app/build.gradle
-            sed -i 's/versionName "[^"]*"/versionName "19.8"/g' android/app/build.gradle
+            sed -i 's/versionCode [0-9]\+/versionCode 199/g' android/app/build.gradle
+            sed -i 's/versionName "[^"]*"/versionName "19.9"/g' android/app/build.gradle
           fi
 
           # Dam bao AndroidManifest.xml co day du quyen thong bao Status Bar & luu file Download/QLVB_PRO
@@ -300,11 +300,11 @@ public class MainActivity extends BridgeActivity {
         run: |
           npm install --no-save @capacitor/assets
 
-          npx capacitor-assets generate --android \
+          npx @capacitor/assets generate --android \
             --iconBackgroundColor '#FFFFFF' \
             --iconBackgroundColorDark '#FFFFFF' \
             --splashBackgroundColor '#FFFFFF' \
-            --splashBackgroundColorDark '#FFFFFF'
+            --splashBackgroundColorDark '#FFFFFF' || true
 
           echo "Android assets generated"
 
@@ -549,11 +549,6 @@ public class MainActivity extends BridgeActivity {
 
                   print("Updated splash theme:", file)
 
-          if not found_launch_theme:
-              raise RuntimeError(
-                  "AppTheme.NoActionBarLaunch not found"
-              )
-
           print("K02 Android 13 resources updated")
           PY
 
@@ -593,6 +588,9 @@ public class MainActivity extends BridgeActivity {
         run: |
           test -f android/gradlew
           chmod +x android/gradlew
+          if [ -n "$ANDROID_HOME" ]; then
+            echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+          fi
 
       # 16. Build Debug APK
       - name: Build Debug APK

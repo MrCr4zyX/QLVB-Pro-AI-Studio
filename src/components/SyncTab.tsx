@@ -322,6 +322,14 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         setDriveStatus('Đang chuyển tới cổng xác thực Google Drive...');
         return;
       }
+      if (msg === 'REDIRECTING_TO_GOOGLE') {
+        setDriveStatus('Đang chuyển hướng sang trang chọn tài khoản Google...');
+        return;
+      }
+      if (msg.includes('Đang mở trình duyệt Chrome')) {
+        setDriveStatus(msg);
+        return;
+      }
       if (
         isAutoTrigger &&
         (err?.code === 'auth/popup-blocked' ||

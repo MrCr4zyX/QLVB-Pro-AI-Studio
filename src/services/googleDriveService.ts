@@ -412,10 +412,35 @@ const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: st
 export const googleSignIn = async (forceConsent = false): Promise<{ user: User; accessToken: string }> => {
   const isApkWebView = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
 
+  // If running inside Android APK native WebView, open external Chrome browser
+  // because Google blocks OAuth sign-ins inside embedded WebViews (disallowed_useragent)
+  if (isApkWebView) {
+    const bridge = (window as any).AndroidBridge;
+    if (bridge && typeof bridge.openExternalBrowser === 'function') {
+      bridge.openExternalBrowser(WEB_AUTH_PORTAL_URL);
+      throw new Error('Đang mở trình duyệt Chrome để đăng nhập Google an toàn. Sau khi đăng nhập, ứng dụng sẽ tự động kết nối.');
+    }
+  }
+
   // Immediately open authorized portal on external PWA domains (e.g. GitHub Pages)
   // so the browser popup blocker never blocks window.open due to async delay
   if (!isAuthorizedFirebaseHost() && !isApkWebView) {
     return await signInViaAuthorizedPortalPopup();
+  }
+
+  const isMobile =
+    typeof window !== 'undefined' &&
+    (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '') ||
+      window.matchMedia?.('(pointer:coarse)').matches);
+
+  const searchParams =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const isPortalMode = Boolean(searchParams && searchParams.get('apk_auth') === '1');
+
+  // On mobile devices or portal mode, redirect sign-in is 100% reliable and avoids popup-closed-by-user
+  if (isMobile && isPortalMode) {
+    await googleSignInRedirect();
+    throw new Error('REDIRECTING_TO_GOOGLE');
   }
 
   try {
@@ -428,7 +453,26 @@ export const googleSignIn = async (forceConsent = false): Promise<{ user: User; 
       provider.setCustomParameters({ prompt: 'select_account' });
     }
 
-    const result = await signInWithPopup(auth, provider);
+    let result;
+    try {
+      result = await signInWithPopup(auth, provider);
+    } catch (popupErr: any) {
+      const code = popupErr?.code || '';
+      const msg = String(popupErr?.message || '');
+      if (
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/popup-blocked' ||
+        code === 'auth/cancelled-popup-request' ||
+        msg.includes('popup-closed-by-user') ||
+        msg.includes('popup-blocked')
+      ) {
+        // Fallback to same-tab redirect sign in
+        await googleSignInRedirect();
+        throw new Error('REDIRECTING_TO_GOOGLE');
+      }
+      throw popupErr;
+    }
+
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error('Không thể lấy mã truy cập Google Drive từ xác thực.');
@@ -895,8 +939,8 @@ export async function uploadApkToDrive(
   }
 
   if (onStatusUpdate) onStatusUpdate('Đang tải tệp APK từ bộ nhớ ứng dụng...');
-  let apkRes = await fetch('./k02_mobile_qlvb_19.8.apk');
-  if (!apkRes.ok) apkRes = await fetch('./k02_mobile_qlvb_19.7.apk');
+  let apkRes = await fetch('./k02_mobile_qlvb_19.9.apk');
+  if (!apkRes.ok) apkRes = await fetch('./k02_mobile_qlvb_19.8.apk');
   if (!apkRes.ok) apkRes = await fetch('./k02_mobile_qlvb.apk');
   if (!apkRes.ok) {
     throw new Error('Không tìm thấy tệp APK nội bộ để tải lên.');
@@ -906,8 +950,8 @@ export async function uploadApkToDrive(
   if (onStatusUpdate) onStatusUpdate(`Đang tải lên Google Drive (${(apkBlob.size / (1024 * 1024)).toFixed(1)} MB)...`);
 
   const metadata = {
-    name: 'k02_mobile_qlvb_19.8.apk',
-    description: 'Ứng dụng Quản lý văn bản K02 Mobile trên Android (v19.8)',
+    name: 'k02_mobile_qlvb_19.9.apk',
+    description: 'Ứng dụng Quản lý văn bản K02 Mobile trên Android (v19.9)',
     mimeType: 'application/vnd.android.package-archive',
   };
 
