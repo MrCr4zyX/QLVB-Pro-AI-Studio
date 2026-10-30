@@ -83,7 +83,7 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
   };
 
   return (
-    <div className="pb-40 pt-3 px-3.5 max-w-4xl mx-auto space-y-3">
+    <div className="pb-24 pt-3 px-4 sm:px-6 max-w-6xl mx-auto space-y-3 flex flex-col min-h-[calc(100vh-100px)]">
       {/* Search Bar */}
       <div className="bg-white rounded-2xl p-2.5 border border-slate-200/90 shadow-xs flex items-center gap-2">
         <Search className="w-4 h-4 text-slate-400 shrink-0 ml-1" />
@@ -209,7 +209,7 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
       </div>
 
       {/* Document Cards List */}
-      <div className="space-y-3">
+      <div className="space-y-3 flex-1 flex flex-col">
         {filteredDocs.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center border border-slate-200 text-slate-400 space-y-2">
             <FileText className="w-10 h-10 mx-auto text-slate-300" />

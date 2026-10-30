@@ -151,7 +151,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   }, [documents, activeStatus, selectedType, selectedField]);
 
   return (
-    <div className="pb-24 pt-4 px-3.5 max-w-4xl mx-auto space-y-4">
+    <div className="pb-24 pt-4 px-4 sm:px-6 max-w-6xl mx-auto space-y-4 flex flex-col min-h-[calc(100vh-100px)]">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -263,7 +263,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
       </div>
 
       {/* Selected Status Document List */}
-      <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-xs space-y-2.5">
+      <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-xs space-y-2.5 flex-1 flex flex-col min-h-[350px]">
         <div className="flex items-center justify-between text-xs">
           <h3 className="font-bold text-slate-800 uppercase">
             Danh sách ({[activeStatus !== 'Tất cả' ? activeStatus : null, selectedType, selectedField].filter(Boolean).join(' · ') || 'Tất cả'}): {filteredByStatus.length} văn bản
@@ -271,7 +271,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           <span className="text-[11px] text-slate-400">Nhấn vào để chỉnh sửa</span>
         </div>
 
-        <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+        <div className="space-y-2 flex-1 overflow-y-auto pr-1">
           {filteredByStatus.length === 0 && <div className="p-3 text-xs text-slate-500 text-center">Không có văn bản phù hợp với bộ lọc đã chọn.</div>}
           {filteredByStatus.map((d) => (
             <div
