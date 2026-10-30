@@ -105,6 +105,10 @@ export default function App() {
 
   // Show startup alert if overdue or urgent deadlines exist (matching PC 3.5.10 startup popup)
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('apk_auth') === '1' || params.get('pwa_origin') || params.get('code')) {
+      return;
+    }
     const hasSeenTodayAlert = sessionStorage.getItem('k02_startup_alert_shown');
     if (!hasSeenTodayAlert && alertReports.length > 0) {
       sessionStorage.setItem('k02_startup_alert_shown', 'true');

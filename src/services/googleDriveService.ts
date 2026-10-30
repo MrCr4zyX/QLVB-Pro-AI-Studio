@@ -30,6 +30,10 @@ provider.addScope('https://www.googleapis.com/auth/drive');
 provider.addScope('https://www.googleapis.com/auth/drive.file');
 
 let isSigningIn = false;
+let authOperationId = 0;
+let activePortalCancel: (() => void) | null = null;
+const AUTH_BROADCAST_CHANNEL = 'k02_gdrive_auth_channel';
+
 let cachedAccessToken: string | null =
   typeof window !== 'undefined'
     ? localStorage.getItem(TOKEN_STORAGE_KEY) || sessionStorage.getItem(TOKEN_STORAGE_KEY)
@@ -39,12 +43,52 @@ let cachedIdToken: string | null =
     ? localStorage.getItem(ID_TOKEN_STORAGE_KEY)
     : null;
 
+export const isAuthorizedFirebaseHost = (): boolean => {
+  if (typeof window === 'undefined') return true;
+  const host = window.location.hostname;
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host.endsWith('.run.app') ||
+    host.endsWith('.firebaseapp.com') ||
+    host.endsWith('.web.app')
+  );
+};
+
+export const broadcastAuthBridgeCode = (code: string) => {
+  if (typeof window === 'undefined' || !code) return;
+  try {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: 'K02_AUTH_BRIDGE_CODE', code }, '*');
+    }
+  } catch {
+    // Ignore cross-origin opener error
+  }
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel(AUTH_BROADCAST_CHANNEL);
+      bc.postMessage({ type: 'K02_AUTH_BRIDGE_CODE', code });
+      setTimeout(() => bc.close(), 500);
+    }
+  } catch {
+    // Ignore BroadcastChannel error
+  }
+};
+
+export const cancelPendingPortalPopup = () => {
+  if (activePortalCancel) {
+    activePortalCancel();
+    activePortalCancel = null;
+  }
+};
+
 function saveTokens(
   accessToken: string,
   idToken?: string | null,
   profile?: { email?: string | null; displayName?: string | null; photoURL?: string | null },
   expiresInSec = 3500
 ) {
+  authOperationId += 1;
   cachedAccessToken = accessToken;
   if (idToken) cachedIdToken = idToken;
   if (typeof window !== 'undefined') {
@@ -128,7 +172,7 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && isAuthorizedFirebaseHost()) {
     getRedirectResult(auth)
       .then((result) => {
         if (result && result.user) {
@@ -149,16 +193,29 @@ export const initAuth = (
   }
 
   return onAuthStateChanged(auth, async (user: User | null) => {
-    const hasV2Scope = typeof window !== 'undefined' && localStorage.getItem(SCOPE_VERSION_KEY) === 'true';
-    if (cachedAccessToken) {
-      const isValid = await verifyAndRefreshTokenExpiry(cachedAccessToken);
+    if (isSigningIn) return;
+
+    const opIdAtStart = authOperationId;
+    const tokenAtStart =
+      cachedAccessToken ||
+      (typeof window !== 'undefined' ? localStorage.getItem(TOKEN_STORAGE_KEY) : null);
+
+    if (tokenAtStart) {
+      cachedAccessToken = tokenAtStart;
+      const isValid = await verifyAndRefreshTokenExpiry(tokenAtStart);
+      if (isSigningIn || authOperationId !== opIdAtStart) return;
       if (!isValid) {
-        clearExpiredAccessToken();
-        if (onAuthFailure) onAuthFailure();
+        if (cachedAccessToken === tokenAtStart) {
+          clearExpiredAccessToken();
+          if (onAuthFailure) onAuthFailure();
+        }
         return;
       }
     }
 
+    if (isSigningIn || authOperationId !== opIdAtStart) return;
+
+    const hasV2Scope = typeof window !== 'undefined' && localStorage.getItem(SCOPE_VERSION_KEY) === 'true';
     if (user && cachedAccessToken && hasV2Scope) {
       if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
     } else if (!user && cachedAccessToken) {
@@ -166,8 +223,7 @@ export const initAuth = (
       if (fallbackUser && onAuthSuccess) {
         onAuthSuccess(fallbackUser, cachedAccessToken);
       }
-    } else if (!isSigningIn) {
-      clearExpiredAccessToken();
+    } else if (!isSigningIn && !cachedAccessToken) {
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -179,8 +235,12 @@ export const getPwaAuthPortalUrl = (): string => {
   return `${WEB_AUTH_PORTAL_URL}&pwa_origin=${encodeURIComponent(cleanOriginUrl)}`;
 };
 
-export const generatePwaReturnUrl = (pwaOrigin: string): string | null => {
-  const code = generateApkAuthBridgeCode();
+export const generatePwaReturnUrl = (
+  pwaOrigin: string,
+  tokenOverride?: string | null,
+  userOverride?: User | null
+): string | null => {
+  const code = generateApkAuthBridgeCode(tokenOverride, userOverride);
   if (!code || !pwaOrigin) return null;
   try {
     const returnUrl = new URL(pwaOrigin);
@@ -200,9 +260,23 @@ const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: st
       return;
     }
 
+    cancelPendingPortalPopup();
+
     const portalUrl = getPwaAuthPortalUrl();
-    const width = 520;
-    const height = 680;
+    const isStandalonePwa =
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (window.navigator as any)?.standalone === true;
+    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+
+    // In standalone mobile PWA, same-tab redirect is faster and avoids trapped popups
+    if (isStandalonePwa && isMobileDevice) {
+      window.location.href = portalUrl;
+      reject(new Error('REDIRECTING_TO_PORTAL'));
+      return;
+    }
+
+    const width = 540;
+    const height = 700;
     const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
     const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
 
@@ -212,56 +286,146 @@ const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: st
       `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
     );
 
-    // If popup was blocked by browser (e.g. mobile standalone PWA), redirect in same tab
+    // If popup was blocked by browser, redirect in same tab immediately
     if (!popup) {
       window.location.href = portalUrl;
+      reject(new Error('REDIRECTING_TO_PORTAL'));
       return;
     }
 
     let settled = false;
-    const cleanup = () => {
-      window.removeEventListener('message', onMessage);
-      clearInterval(checkClosedTimer);
-    };
+    let bc: BroadcastChannel | null = null;
 
-    const onMessage = async (event: MessageEvent) => {
-      if (event.data && event.data.type === 'K02_AUTH_BRIDGE_CODE' && typeof event.data.code === 'string') {
-        settled = true;
-        cleanup();
+    const cleanup = () => {
+      activePortalCancel = null;
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', onWindowFocus);
+      clearTimeout(maxWaitTimer);
+      if (bc) {
         try {
-          if (!popup.closed) popup.close();
+          bc.close();
         } catch {
-          // Ignore popup close error
+          // Ignore close error
         }
-        try {
-          const res = await connectWithExternalToken(event.data.code);
-          resolve(res);
-        } catch (err) {
-          reject(err);
-        }
+        bc = null;
       }
     };
+
+    const handleBridgeCode = async (code: string) => {
+      if (settled || !code) return;
+      settled = true;
+      cleanup();
+      try {
+        if (popup && !popup.closed) popup.close();
+      } catch {
+        // Ignore popup close error
+      }
+      try {
+        const res = await connectWithExternalToken(code);
+        resolve(res);
+      } catch (err) {
+        reject(err);
+      }
+    };
+
+    const checkLocalTokenSaved = () => {
+      if (settled) return false;
+      const freshToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+      if (freshToken && !isStoredTokenExpired()) {
+        cachedAccessToken = freshToken;
+        const savedUser = getSavedUserProfile();
+        if (savedUser) {
+          settled = true;
+          cleanup();
+          try {
+            if (popup && !popup.closed) popup.close();
+          } catch {
+            // Ignore
+          }
+          resolve({ user: savedUser, accessToken: freshToken });
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'K02_AUTH_BRIDGE_CODE' && typeof event.data.code === 'string') {
+        handleBridgeCode(event.data.code);
+      }
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === TOKEN_STORAGE_KEY && event.newValue) {
+        checkLocalTokenSaved();
+      }
+    };
+
+    const onWindowFocus = () => {
+      setTimeout(() => {
+        checkLocalTokenSaved();
+      }, 300);
+    };
+
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel(AUTH_BROADCAST_CHANNEL);
+        bc.onmessage = (event) => {
+          if (event.data && event.data.type === 'K02_AUTH_BRIDGE_CODE' && typeof event.data.code === 'string') {
+            handleBridgeCode(event.data.code);
+          }
+        };
+      } catch {
+        // Ignore BroadcastChannel error
+      }
+    }
 
     window.addEventListener('message', onMessage);
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('focus', onWindowFocus);
 
-    const checkClosedTimer = setInterval(() => {
-      if (popup.closed && !settled) {
+    activePortalCancel = () => {
+      if (!settled) {
         settled = true;
         cleanup();
-        reject(new Error('Đã đóng cửa sổ xác thực trước khi hoàn tất đăng nhập.'));
+        try {
+          if (popup && !popup.closed) popup.close();
+        } catch {
+          // Ignore
+        }
+        reject(new Error('Đã hủy phiên chờ đăng nhập.'));
       }
-    }, 800);
+    };
+
+    // Timeout after 3 minutes if user abandons the popup
+    const maxWaitTimer = setTimeout(() => {
+      if (!settled && !checkLocalTokenSaved()) {
+        settled = true;
+        cleanup();
+        reject(new Error('Quá thời gian chờ xác thực Google Drive. Vui lòng thử lại.'));
+      }
+    }, 180000);
   });
 };
 
 export const googleSignIn = async (forceConsent = false): Promise<{ user: User; accessToken: string }> => {
+  const isApkWebView = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
+
+  // Immediately open authorized portal on external PWA domains (e.g. GitHub Pages)
+  // so the browser popup blocker never blocks window.open due to async delay
+  if (!isAuthorizedFirebaseHost() && !isApkWebView) {
+    return await signInViaAuthorizedPortalPopup();
+  }
+
   try {
+    authOperationId += 1;
     isSigningIn = true;
     const hasV2Scope = typeof window !== 'undefined' && localStorage.getItem(SCOPE_VERSION_KEY) === 'true';
     if (forceConsent || !hasV2Scope) {
-      provider.setCustomParameters({ prompt: 'consent' });
+      provider.setCustomParameters({ prompt: 'consent select_account' });
     } else {
-      provider.setCustomParameters({});
+      provider.setCustomParameters({ prompt: 'select_account' });
     }
 
     const result = await signInWithPopup(auth, provider);
@@ -280,10 +444,8 @@ export const googleSignIn = async (forceConsent = false): Promise<{ user: User; 
     const isUnauthorizedDomain =
       error?.code === 'auth/unauthorized-domain' ||
       String(error?.message || '').includes('auth/unauthorized-domain');
-    const isApkWebView = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
 
     if (isUnauthorizedDomain && !isApkWebView) {
-      console.info('Domain not in Firebase authorizedDomains, falling back to authorized portal popup...');
       return await signInViaAuthorizedPortalPopup();
     }
 
@@ -299,7 +461,14 @@ export const googleSignIn = async (forceConsent = false): Promise<{ user: User; 
  * and falls back to the authorized portal redirect when running on external PWA domains like GitHub Pages)
  */
 export const googleSignInRedirect = async (): Promise<void> => {
+  const isApkWebView = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
+  if (!isAuthorizedFirebaseHost() && !isApkWebView && typeof window !== 'undefined') {
+    window.location.href = getPwaAuthPortalUrl();
+    return;
+  }
+
   try {
+    authOperationId += 1;
     isSigningIn = true;
     provider.setCustomParameters({ prompt: 'select_account' });
     await signInWithRedirect(auth, provider);
@@ -308,7 +477,6 @@ export const googleSignInRedirect = async (): Promise<void> => {
     const isUnauthorizedDomain =
       error?.code === 'auth/unauthorized-domain' ||
       String(error?.message || '').includes('auth/unauthorized-domain');
-    const isApkWebView = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
 
     if (isUnauthorizedDomain && !isApkWebView && typeof window !== 'undefined') {
       window.location.href = getPwaAuthPortalUrl();
@@ -319,13 +487,20 @@ export const googleSignInRedirect = async (): Promise<void> => {
 };
 
 /**
- * Generate compact Base64 token code or Deep Link for connecting the Android APK from Chrome Web Browser
+ * Generate compact Base64 token code or Deep Link for connecting the Android APK / PWA
  */
-export const generateApkAuthBridgeCode = (): string | null => {
-  if (!cachedAccessToken) return null;
-  const currentUser = auth.currentUser || getSavedUserProfile();
+export const generateApkAuthBridgeCode = (
+  tokenOverride?: string | null,
+  userOverride?: User | null
+): string | null => {
+  const activeToken =
+    tokenOverride ||
+    cachedAccessToken ||
+    (typeof window !== 'undefined' ? localStorage.getItem(TOKEN_STORAGE_KEY) : null);
+  if (!activeToken) return null;
+  const currentUser = userOverride || auth.currentUser || getSavedUserProfile();
   const payload = {
-    a: cachedAccessToken,
+    a: activeToken,
     i: cachedIdToken || '',
     e: currentUser?.email || '',
     n: currentUser?.displayName || '',
@@ -334,8 +509,12 @@ export const generateApkAuthBridgeCode = (): string | null => {
   return window.btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
 };
 
-export const generateApkDeepLink = (useIntentScheme = false): string | null => {
-  const code = generateApkAuthBridgeCode();
+export const generateApkDeepLink = (
+  useIntentScheme = false,
+  tokenOverride?: string | null,
+  userOverride?: User | null
+): string | null => {
+  const code = generateApkAuthBridgeCode(tokenOverride, userOverride);
   if (!code) return null;
   if (useIntentScheme) {
     return `intent://auth?code=${encodeURIComponent(code)}#Intent;scheme=k02qlvb;package=com.k02.qlvbpro;end`;

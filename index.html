@@ -21,6 +21,27 @@
     <div id="k02-startup-splash" style="position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#fff;user-select:none;opacity:1;">
       <img src="./app-logo.png" alt="K02 Splash" style="width:260px;height:260px;max-width:85vw;max-height:60dvh;object-fit:contain;flex-shrink:0;display:block;" />
     </div>
+    <script>
+      (function () {
+        var s = window.location.search || '';
+        var el = document.getElementById('k02-startup-splash');
+        if (!el) return;
+        if (s.indexOf('apk_auth=1') !== -1 || s.indexOf('pwa_origin=') !== -1 || s.indexOf('code=') !== -1) {
+          el.remove();
+          return;
+        }
+        setTimeout(function () {
+          var fallbackEl = document.getElementById('k02-startup-splash');
+          if (fallbackEl) {
+            fallbackEl.style.transition = 'opacity 250ms ease';
+            fallbackEl.style.opacity = '0';
+            setTimeout(function () {
+              if (fallbackEl.parentNode) fallbackEl.parentNode.removeChild(fallbackEl);
+            }, 250);
+          }
+        }, 1200);
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
