@@ -295,7 +295,7 @@
 .end method
 
 .method public saveBase64ToDownloads(Ljava/lang/String;Ljava/lang/String;)Z
-    .registers 7
+    .registers 10
 
     const/4 v0, 0x0
 
@@ -303,10 +303,114 @@
     invoke-static {p1, v0}, Landroid/util/Base64;->decode(Ljava/lang/String;I)[B
 
     move-result-object v1
-    :try_end_5
-    .catch Ljava/lang/Throwable; {:try_start_1 .. :try_end_5} :catch_59
 
-    :try_start_5
+    move-object v2, p2
+
+    const-string v3, "QLVB_PRO/"
+
+    invoke-virtual {v2, v3}, Ljava/lang/String;->startsWith(Ljava/lang/String;)Z
+
+    move-result v3
+
+    if-eqz v3, :cond_18
+
+    const/16 v3, 0x9
+
+    invoke-virtual {v2, v3}, Ljava/lang/String;->substring(I)Ljava/lang/String;
+
+    move-result-object v2
+
+    :cond_18
+    new-instance v3, Ljava/lang/StringBuilder;
+
+    invoke-direct {v3}, Ljava/lang/StringBuilder;-><init>()V
+
+    const-string v4, "QLVB_PRO/"
+
+    invoke-virtual {v3, v4}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    invoke-virtual {v3, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    invoke-virtual {v3}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+
+    move-result-object v6
+    :try_end_2b
+    .catch Ljava/lang/Throwable; {:try_start_1 .. :try_end_2b} :catch_b3
+
+    sget v3, Landroid/os/Build$VERSION;->SDK_INT:I
+
+    const/16 v4, 0x1d
+
+    if-lt v3, v4, :cond_6d
+
+    :try_start_31
+    invoke-virtual {p0}, Lcom/k02/qlvbpro/MainActivity;->getContentResolver()Landroid/content/ContentResolver;
+
+    move-result-object v3
+
+    new-instance v4, Landroid/content/ContentValues;
+
+    invoke-direct {v4}, Landroid/content/ContentValues;-><init>()V
+
+    const-string v5, "_display_name"
+
+    invoke-virtual {v4, v5, v2}, Landroid/content/ContentValues;->put(Ljava/lang/String;Ljava/lang/String;)V
+
+    const-string v5, ".json"
+
+    invoke-virtual {v2, v5}, Ljava/lang/String;->endsWith(Ljava/lang/String;)Z
+
+    move-result v5
+
+    if-eqz v5, :cond_4c
+
+    const-string v5, "application/json"
+
+    goto :goto_4e
+
+    :cond_4c
+    const-string v5, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    :goto_4e
+    const-string p1, "mime_type"
+
+    invoke-virtual {v4, p1, v5}, Landroid/content/ContentValues;->put(Ljava/lang/String;Ljava/lang/String;)V
+
+    const-string p1, "relative_path"
+
+    const-string v5, "Download/QLVB_PRO"
+
+    invoke-virtual {v4, p1, v5}, Landroid/content/ContentValues;->put(Ljava/lang/String;Ljava/lang/String;)V
+
+    sget-object v5, Landroid/provider/MediaStore$Downloads;->EXTERNAL_CONTENT_URI:Landroid/net/Uri;
+
+    invoke-virtual {v3, v5, v4}, Landroid/content/ContentResolver;->insert(Landroid/net/Uri;Landroid/content/ContentValues;)Landroid/net/Uri;
+
+    move-result-object v5
+
+    if-eqz v5, :cond_6d
+
+    invoke-virtual {v3, v5}, Landroid/content/ContentResolver;->openOutputStream(Landroid/net/Uri;)Ljava/io/OutputStream;
+
+    move-result-object v4
+
+    if-eqz v4, :cond_6d
+
+    invoke-virtual {v4, v1}, Ljava/io/OutputStream;->write([B)V
+
+    invoke-virtual {v4}, Ljava/io/OutputStream;->flush()V
+
+    invoke-virtual {v4}, Ljava/io/OutputStream;->close()V
+    :try_end_6b
+    .catch Ljava/lang/Throwable; {:try_start_31 .. :try_end_6b} :catch_6c
+
+    goto :goto_8f
+
+    :catch_6c
+    move-exception v3
+
+    :cond_6d
+    :try_start_6d
     sget-object v2, Landroid/os/Environment;->DIRECTORY_DOWNLOADS:Ljava/lang/String;
 
     invoke-static {v2}, Landroid/os/Environment;->getExternalStoragePublicDirectory(Ljava/lang/String;)Ljava/io/File;
@@ -317,17 +421,17 @@
 
     new-instance v3, Ljava/io/File;
 
-    invoke-direct {v3, v2, p2}, Ljava/io/File;-><init>(Ljava/io/File;Ljava/lang/String;)V
+    invoke-direct {v3, v2, v6}, Ljava/io/File;-><init>(Ljava/io/File;Ljava/lang/String;)V
 
     invoke-virtual {v3}, Ljava/io/File;->getParentFile()Ljava/io/File;
 
     move-result-object v2
 
-    if-eqz v2, :cond_1e
+    if-eqz v2, :cond_86
 
     invoke-virtual {v2}, Ljava/io/File;->mkdirs()Z
 
-    :cond_1e
+    :cond_86
     new-instance v2, Ljava/io/FileOutputStream;
 
     invoke-direct {v2, v3}, Ljava/io/FileOutputStream;-><init>(Ljava/io/File;)V
@@ -337,45 +441,45 @@
     invoke-virtual {v2}, Ljava/io/FileOutputStream;->flush()V
 
     invoke-virtual {v2}, Ljava/io/FileOutputStream;->close()V
-    :try_end_2f
-    .catch Ljava/lang/Throwable; {:try_start_5 .. :try_end_2f} :catch_37
+    :try_end_8f
+    .catch Ljava/lang/Throwable; {:try_start_6d .. :try_end_8f} :catch_97
 
-    :goto_2f
+    :goto_8f
     const-string v2, "\u0110\u00e3 l\u01b0u t\u1ec7p v\u00e0o Download/QLVB_PRO"
 
-    invoke-direct {p0, v2, p2}, Lcom/k02/qlvbpro/MainActivity;->triggerNativeNotification(Ljava/lang/String;Ljava/lang/String;)V
+    invoke-direct {p0, v2, v6}, Lcom/k02/qlvbpro/MainActivity;->triggerNativeNotification(Ljava/lang/String;Ljava/lang/String;)V
 
     const/4 v0, 0x1
 
     return v0
 
-    :catch_37
+    :catch_97
     move-exception v2
 
-    :try_start_38
+    :try_start_98
     sget-object v2, Landroid/os/Environment;->DIRECTORY_DOWNLOADS:Ljava/lang/String;
 
     invoke-virtual {p0, v2}, Lcom/k02/qlvbpro/MainActivity;->getExternalFilesDir(Ljava/lang/String;)Ljava/io/File;
 
     move-result-object v2
 
-    if-eqz v2, :cond_5a
+    if-eqz v2, :cond_b4
 
     invoke-virtual {v2}, Ljava/io/File;->mkdirs()Z
 
     new-instance v3, Ljava/io/File;
 
-    invoke-direct {v3, v2, p2}, Ljava/io/File;-><init>(Ljava/io/File;Ljava/lang/String;)V
+    invoke-direct {v3, v2, v6}, Ljava/io/File;-><init>(Ljava/io/File;Ljava/lang/String;)V
 
     invoke-virtual {v3}, Ljava/io/File;->getParentFile()Ljava/io/File;
 
     move-result-object v2
 
-    if-eqz v2, :cond_4d
+    if-eqz v2, :cond_ad
 
     invoke-virtual {v2}, Ljava/io/File;->mkdirs()Z
 
-    :cond_4d
+    :cond_ad
     new-instance v2, Ljava/io/FileOutputStream;
 
     invoke-direct {v2, v3}, Ljava/io/FileOutputStream;-><init>(Ljava/io/File;)V
@@ -385,15 +489,15 @@
     invoke-virtual {v2}, Ljava/io/FileOutputStream;->flush()V
 
     invoke-virtual {v2}, Ljava/io/FileOutputStream;->close()V
-    :try_end_57
-    .catch Ljava/lang/Throwable; {:try_start_38 .. :try_end_57} :catch_59
+    :try_end_b1
+    .catch Ljava/lang/Throwable; {:try_start_98 .. :try_end_b1} :catch_b3
 
-    goto :goto_2f
+    goto :goto_8f
 
-    :catch_59
+    :catch_b3
     move-exception v1
 
-    :cond_5a
+    :cond_b4
     return v0
 .end method
 

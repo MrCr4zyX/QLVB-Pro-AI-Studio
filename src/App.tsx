@@ -101,7 +101,7 @@ export default function App() {
     totalAlertsCount,
     isBackupReminderDue,
     weeklyBackupCycleKey,
-    lastBackupAt,
+    dismissScheduledBackupReminder,
     permission,
     requestPermission,
   } = useNotifications(enrichedReports);
@@ -369,13 +369,14 @@ export default function App() {
         urgentCount={Math.max(0, totalAlertsCount - overdueCount)}
         isBackupReminderDue={isBackupReminderDue}
         weeklyBackupCycleKey={weeklyBackupCycleKey}
+        onDismissBackupReminder={dismissScheduledBackupReminder}
         onOpenDetails={() => setIsNotificationModalOpen(true)}
         onBackupNow={() => setCurrentTab('sync')}
       />
 
       {/* Top Header */}
       <Header
-        unreadAlertsCount={totalAlertsCount + (isBackupReminderDue ? 1 : 0)}
+        unreadAlertsCount={totalAlertsCount}
         onOpenNotifications={() => setIsNotificationModalOpen(true)}
         onOpenSync={() => setCurrentTab('sync')}
         onOpenInstallGuide={() => setIsInstallModalOpen(true)}
@@ -503,12 +504,9 @@ export default function App() {
         isOpen={isNotificationModalOpen}
         onClose={() => setIsNotificationModalOpen(false)}
         alertReports={alertReports}
-        isBackupReminderDue={isBackupReminderDue}
-        lastBackupAt={lastBackupAt}
         permission={permission}
         onRequestPermission={requestPermission}
         onGoToDashboard={() => setCurrentTab('dashboard')}
-        onGoToSync={() => setCurrentTab('sync')}
         onOpenReportResult={handleOpenReportResult}
       />
 

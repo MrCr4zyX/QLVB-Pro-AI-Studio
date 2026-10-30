@@ -147,10 +147,17 @@ export function buildExcelWorkbook(state: AppDataState): XLSX.WorkBook {
 /**
  * Export current database state into a PC-compatible .xlsx file inside Download/QLVB_PRO
  */
-export function exportToExcel(state: AppDataState, filename = 'documents.xlsx') {
+export async function exportToExcel(
+  state: AppDataState,
+  filename = 'documents.xlsx',
+  preAcquiredDirHandle?: any
+) {
   const wb = buildExcelWorkbook(state);
-  saveWorkbookToQlvbFolder(wb, filename);
-  return state.documents.length;
+  const exportResult = await saveWorkbookToQlvbFolder(wb, filename, preAcquiredDirHandle);
+  return {
+    count: state.documents.length,
+    exportResult,
+  };
 }
 
 /**

@@ -93,8 +93,8 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
   }, [documents]);
 
-  // Export summary Excel (supports both Android APK native bridge and Web/PWA browser download)
-  const exportStatisticsExcel = () => {
+  // Export summary Excel (supports both Android APK native bridge and PC/Web QLVB_PRO subfolder creation)
+  const exportStatisticsExcel = async () => {
     try {
       const wb = XLSX.utils.book_new();
 
@@ -143,7 +143,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
 
       const timestamp = getExportTimestampPrefix();
       const filename = `${timestamp}_ThongKeVanBan.xlsx`;
-      const { targetPath } = saveWorkbookToQlvbFolder(wb, filename);
+      const { targetPath, isIframeFallback } = await saveWorkbookToQlvbFolder(wb, filename);
 
       playSuccessChime();
       notifyAndroidNative(
@@ -152,9 +152,12 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
       );
       setExportNotice({
         type: 'success',
-        message: `Đã xuất tệp thống kê vào "${targetPath}" thành công!`,
+        message: isIframeFallback
+          ? `✓ Đã tải tệp "${filename}".\n(Mở ứng dụng ở tab trình duyệt PC riêng để tự động tạo thư mục con Download/QLVB_PRO)`
+          : `✓ Đã xuất tệp thống kê thành công (${documents.length} văn bản)!\n📁 Vị trí: ${targetPath}`,
       });
     } catch (err: any) {
+      if (err?.isUserCancelled) return;
       playAlertChime();
       setExportNotice({
         type: 'error',
@@ -194,7 +197,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           style={{ top: 'max(3.8rem, calc(env(safe-area-inset-top, 0px) + 3.8rem))' }}
         >
           <div
-            className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 backdrop-blur-md shadow-2xl ${
+            className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 backdrop-blur-md shadow-2xl overflow-hidden ${
               exportNotice.type === 'success'
                 ? 'bg-slate-900/95 border-emerald-400 text-emerald-100'
                 : 'bg-slate-900/95 border-rose-400 text-rose-100'
@@ -205,10 +208,12 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             ) : (
               <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
             )}
-            <div className="flex-1 font-semibold leading-relaxed">{exportNotice.message}</div>
+            <div className="flex-1 min-w-0 font-semibold leading-relaxed break-words break-all [overflow-wrap:anywhere] whitespace-pre-line">
+              {exportNotice.message}
+            </div>
             <button
               onClick={() => setExportNotice(null)}
-              className="text-xs font-black p-1 hover:bg-white/20 rounded-lg text-white"
+              className="text-xs font-black p-1 hover:bg-white/20 rounded-lg text-white shrink-0 ml-1"
             >
               ✕
             </button>

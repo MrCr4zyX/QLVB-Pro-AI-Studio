@@ -9,6 +9,7 @@ interface FloatingNotificationProps {
   urgentCount: number;
   isBackupReminderDue: boolean;
   weeklyBackupCycleKey: string;
+  onDismissBackupReminder?: () => void;
   onOpenDetails: () => void;
   onBackupNow: () => void;
 }
@@ -18,6 +19,7 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
   urgentCount,
   isBackupReminderDue,
   weeklyBackupCycleKey,
+  onDismissBackupReminder,
   onOpenDetails,
   onBackupNow,
 }) => {
@@ -47,6 +49,7 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
     setHasInteractedWithReports(true);
     if (isBackupReminderDue) {
       setDismissedCycleKey(weeklyBackupCycleKey);
+      onDismissBackupReminder?.();
     }
   };
 
@@ -81,7 +84,7 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
                   <span>CẢNH BÁO!</span>
                 </span>
                 <span className="text-[11px] font-bold text-amber-300">
-                  {showBackupAlert ? 'Định kỳ 10:00 & 15:00 Thứ 2' : 'Thời hạn K02'}
+                  {showBackupAlert ? 'QUẢN LÝ VĂN BẢN & BÁO CÁO' : 'QLVB_PRO'}
                 </span>
               </div>
 

@@ -1,15 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  X,
-  Bell,
-  AlertTriangle,
-  ArrowRight,
-  ChevronRight,
-  ShieldCheck,
-  Volume2,
-  DatabaseBackup,
-  CheckCircle2,
-} from 'lucide-react';
+import { X, Bell, ArrowRight, ShieldCheck, Volume2 } from 'lucide-react';
 import { EnrichedReport } from '../types';
 import { playAlertChime } from '../utils/soundUtils';
 import { sendSystemPushNotification } from '../hooks/useNotifications';
@@ -18,12 +8,9 @@ interface NotificationModalProps {
   isOpen: boolean;
   onClose: () => void;
   alertReports: EnrichedReport[];
-  isBackupReminderDue?: boolean;
-  lastBackupAt?: string | null;
   permission: NotificationPermission;
   onRequestPermission: () => Promise<boolean>;
   onGoToDashboard: () => void;
-  onGoToSync: () => void;
   onOpenReportResult: (reportId: string) => void;
 }
 
@@ -31,32 +18,19 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
   isOpen,
   onClose,
   alertReports,
-  isBackupReminderDue = true,
-  lastBackupAt = null,
   permission,
   onRequestPermission,
   onGoToDashboard,
-  onGoToSync,
   onOpenReportResult,
 }) => {
   const [hasRung, setHasRung] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && (alertReports.length > 0 || isBackupReminderDue)) {
+    if (isOpen && alertReports.length > 0) {
       playAlertChime();
     }
-  }, [isOpen, alertReports.length, isBackupReminderDue]);
-
-  const formattedLastBackup = lastBackupAt
-    ? new Date(lastBackupAt).toLocaleString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      })
-    : 'Chưa có bản sao lưu gần đây';
+  }, [isOpen, alertReports.length]);
 
   const handleRingAndPushNotification = async () => {
     setPushError(null);
@@ -74,10 +48,8 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
     }
 
     const ok = await sendSystemPushNotification(
-      isBackupReminderDue ? '⚠️ CẢNH BÁO! Sao lưu dữ liệu K02' : '🔔 Cảnh báo hạn báo cáo K02',
-      isBackupReminderDue
-        ? 'Hãy sao lưu dữ liệu định kỳ! (Nhắc lịch 10:00 & 15:00 Thứ 2 hàng tuần)'
-        : alertReports.length > 0
+      '🔔 Cảnh báo hạn báo cáo K02',
+      alertReports.length > 0
         ? `Có ${alertReports.length} kỳ báo cáo quá hạn hoặc đến hạn cần xử lý!`
         : 'Hệ thống K02 Mobile hoạt động bình thường, tất cả báo cáo đúng tiến độ.'
     );
@@ -101,10 +73,10 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
             <Bell className="w-5 h-5 text-amber-300 animate-bounce" />
             <div>
               <h3 className="font-black text-sm tracking-tight">
-                🔔 {alertReports.length} KỲ BÁO CÁO & NHẮC SAO LƯU
+                🔔 {alertReports.length} KỲ BÁO CÁO CẦN CHÚ Ý !!
               </h3>
               <p className="text-[11px] text-red-100 font-medium">
-                Cảnh báo hạn 30 ngày & Sao lưu định kỳ 10:00, 15:00 Thứ 2
+                Các kỳ quá hạn và sắp đến hạn trong 30 ngày
               </p>
             </div>
           </div>
@@ -141,70 +113,10 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
           </div>
         )}
 
-        {/* Weekly Backup Reminder Banner */}
-        <div className="px-3.5 pt-3 shrink-0">
-          {isBackupReminderDue ? (
-            <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white rounded-xl p-3 border border-amber-400/80 shadow-md flex items-center justify-between gap-2.5">
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-red-600 text-white tracking-wider flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" />
-                    <span>CẢNH BÁO!</span>
-                  </span>
-                  <span className="text-[10px] font-bold text-amber-300">
-                    10:00 sáng & 15:00 chiều Thứ 2
-                  </span>
-                </div>
-                <p className="text-xs font-extrabold text-white mt-1 flex items-center gap-1">
-                  <DatabaseBackup className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Hãy sao lưu dữ liệu định kỳ!</span>
-                </p>
-                <p className="text-[10px] text-slate-300 mt-0.5 truncate">
-                  Sao lưu gần nhất: {formattedLastBackup}
-                </p>
-              </div>
-
-              <button
-                onClick={() => {
-                  onClose();
-                  onGoToSync();
-                }}
-                className="flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-xs px-3 py-2 rounded-xl shadow-xs shrink-0 transition active:scale-95"
-              >
-                <span>Sao lưu ngay</span>
-                <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
-              </button>
-            </div>
-          ) : (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-emerald-900">
-                    Đã sao lưu dữ liệu định kỳ tuần này
-                  </p>
-                  <p className="text-[10px] text-emerald-700 truncate">
-                    Lần cuối: {formattedLastBackup} • Nhắc tiếp theo: 10:00 Thứ 2 tuần tới
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  onClose();
-                  onGoToSync();
-                }}
-                className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 shrink-0 transition"
-              >
-                Sao lưu lại
-              </button>
-            </div>
-          )}
-        </div>
-
         {/* Alerts List */}
         <div className="p-3.5 space-y-2 overflow-y-auto flex-1">
           {alertReports.length === 0 ? (
-            <div className="text-center py-6 text-slate-400 text-xs">
+            <div className="text-center py-8 text-slate-400 text-xs">
               <ShieldCheck className="w-10 h-10 mx-auto text-emerald-500 mb-2" />
               <p className="font-semibold text-slate-700">Không có kỳ báo cáo nào quá hạn hoặc cần nhắc nhở.</p>
               <p className="text-[11px] text-slate-400 mt-0.5">Tất cả công việc đều đang đúng tiến độ.</p>

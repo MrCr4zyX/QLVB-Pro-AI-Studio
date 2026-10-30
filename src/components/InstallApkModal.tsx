@@ -89,15 +89,15 @@ export const InstallApkModal: React.FC<InstallApkModalProps> = ({ isOpen, onClos
     setIsDownloading(true);
     setDownloadMsg('Đang tạo liên kết tải tệp APK...');
     try {
-      let res = await fetch('./k02_mobile_qlvb_19.7.apk');
-      if (!res.ok) res = await fetch('./k02_mobile_qlvb_19.6.apk');
+      let res = await fetch('./k02_mobile_qlvb_19.8.apk');
+      if (!res.ok) res = await fetch('./k02_mobile_qlvb_19.7.apk');
       if (!res.ok) res = await fetch('./k02_mobile_qlvb.apk');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'k02_mobile_qlvb_19.7.apk';
+      a.download = 'k02_mobile_qlvb_19.8.apk';
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
@@ -131,13 +131,13 @@ export const InstallApkModal: React.FC<InstallApkModalProps> = ({ isOpen, onClos
             </div>
             <div>
               <h3 className="text-sm font-bold tracking-tight text-white flex items-center gap-1.5">
-                <span>Cài Đặt Ứng Dụng Android (APK v19.7)</span>
+                <span>Cài Đặt Ứng Dụng Android (APK v19.8)</span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-amber-500 text-slate-950">
-                  v19.7
+                  v19.8
                 </span>
               </h3>
               <p className="text-[11px] text-blue-200/80">
-                Phiên bản 19.7 • Xuất Excel thống kê & đồng bộ Google Drive ổn định
+                Phiên bản 19.8 • Tự động lưu vào Download/QLVB_PRO & đồng bộ Google Drive
               </p>
             </div>
           </div>
@@ -156,7 +156,7 @@ export const InstallApkModal: React.FC<InstallApkModalProps> = ({ isOpen, onClos
             <div className="flex items-center justify-between">
               <span className="font-bold flex items-center gap-1.5 text-emerald-900 text-xs">
                 <FileDown className="w-4 h-4 text-emerald-700" />
-                <span>TỆP TIN CÀI ĐẶT APK v19.7 (CHUẨN CHỮ KÝ ANDROID)</span>
+                <span>TỆP TIN CÀI ĐẶT APK v19.8 (CHUẨN CHỮ KÝ ANDROID)</span>
               </span>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white uppercase tracking-wider">
                 Đã sẵn sàng
@@ -164,7 +164,7 @@ export const InstallApkModal: React.FC<InstallApkModalProps> = ({ isOpen, onClos
             </div>
 
             <p className="text-[11px] text-emerald-950/85 leading-relaxed">
-              Tệp <code>k02_mobile_qlvb_19.7.apk</code> (Phiên bản v19.7) hỗ trợ xuất báo cáo thống kê Excel trực tiếp trên APK, tự động định dạng dấu <code>/</code> khi nhập ngày và ký chuẩn chứng thực Android (V1 + V2 + V3).
+              Tệp <code>k02_mobile_qlvb_19.8.apk</code> (Phiên bản v19.8) hỗ trợ tự động tạo và lưu tệp Excel/JSON vào thư mục <code>Download/QLVB_PRO</code>, nhắc lịch sao lưu định kỳ và ký chuẩn chứng thực Android (V1 + V2 + V3).
             </p>
 
             {/* Primary Download: In-App Direct Download */}
@@ -174,7 +174,7 @@ export const InstallApkModal: React.FC<InstallApkModalProps> = ({ isOpen, onClos
               className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white font-bold text-xs shadow-md active:scale-98 transition text-center cursor-pointer disabled:opacity-50"
             >
               <Download className="w-4 h-4 shrink-0" />
-              <span>{isDownloading ? 'Đang chuẩn bị tệp...' : 'TẢI FILE k02_mobile_qlvb_19.7.apk (2.8 MB)'}</span>
+              <span>{isDownloading ? 'Đang chuẩn bị tệp...' : 'TẢI FILE k02_mobile_qlvb_19.8.apk (2.8 MB)'}</span>
             </button>
 
             {downloadMsg && (

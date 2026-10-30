@@ -37,6 +37,7 @@ import { generateInitialData } from '../services/storageService';
 import { playSuccessChime, playAlertChime, notifyAndroidNative } from '../utils/soundUtils';
 import { markWeeklyBackupCompleted } from '../hooks/useNotifications';
 import {
+  ensurePcQlvbDirectoryHandle,
   getExportTimestampPrefix,
   QLVB_EXPORT_PATH_LABEL,
   saveArrayBufferToQlvbFolder,
@@ -529,6 +530,13 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
 
   // Download a Drive backup file directly to local device
   const handleDownloadDriveFileToDevice = async (file: DriveBackupFile) => {
+    let preDirHandle: any = null;
+    try {
+      preDirHandle = await ensurePcQlvbDirectoryHandle(false);
+    } catch (dirErr: any) {
+      if (dirErr?.name === 'AbortError' || dirErr?.isUserCancelled) return;
+    }
+
     let token = await getAccessToken();
     if (!token) {
       try {
@@ -561,12 +569,18 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         }
       }
 
-      const { targetPath } = saveArrayBufferToQlvbFolder(arrayBuffer, file.name);
+      const { targetPath } = await saveArrayBufferToQlvbFolder(
+        arrayBuffer,
+        file.name,
+        undefined,
+        preDirHandle
+      );
       setImportStatus({
         type: 'info',
         message: `Đã lưu bản sao lưu vào "${targetPath}" trên thiết bị.`,
       });
     } catch (err: any) {
+      if (err?.isUserCancelled) return;
       if (err?.isAuthError) setUser(null);
       setImportStatus({
         type: 'error',
@@ -614,23 +628,33 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
   };
 
   // Local Excel export
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     try {
+      let preDirHandle: any = null;
+      try {
+        preDirHandle = await ensurePcQlvbDirectoryHandle(false);
+      } catch (dirErr: any) {
+        if (dirErr?.name === 'AbortError' || dirErr?.isUserCancelled) return;
+      }
+
       const timestamp = getExportTimestampPrefix();
       const filename = `${timestamp}_documents.xlsx`;
-      const count = exportToExcel(appState, filename);
-      const targetPath = `${QLVB_EXPORT_PATH_LABEL}/${filename}`;
+      const { count, exportResult } = await exportToExcel(appState, filename, preDirHandle);
+      const targetPath = exportResult.targetPath || `${QLVB_EXPORT_PATH_LABEL}/${filename}`;
       markWeeklyBackupCompleted();
       playSuccessChime();
       notifyAndroidNative(
         'K02 Mobile - Xuất Excel thành công',
-        `Đã lưu "${targetPath}" (${count} văn bản)`
+        `Đã lưu: ${targetPath} (${count} văn bản)`
       );
       setImportStatus({
         type: 'success',
-        message: `Đã xuất ${count} văn bản vào "${targetPath}" thành công. Bạn có thể sao chép file này vào máy tính để nhập lại vào phần mềm PC.`,
+        message: exportResult.isIframeFallback
+          ? `✓ Đã tải xuống "${filename}" (${count} văn bản).\n(Mở ứng dụng ở tab trình duyệt PC riêng để tự động tạo thư mục con Download/QLVB_PRO)`
+          : `✓ Đã xuất thành công ${count} văn bản!\n📁 Vị trí: ${targetPath}`,
       });
     } catch (error: any) {
+      if (error?.isUserCancelled) return;
       playAlertChime();
       setImportStatus({
         type: 'error',
@@ -639,24 +663,39 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     }
   };
 
-  const handleExportJSON = () => {
+  const handleExportJSON = async () => {
     try {
+      let preDirHandle: any = null;
+      try {
+        preDirHandle = await ensurePcQlvbDirectoryHandle(false);
+      } catch (dirErr: any) {
+        if (dirErr?.name === 'AbortError' || dirErr?.isUserCancelled) return;
+      }
+
       const jsonStr = JSON.stringify(appState, null, 2);
       const timestamp = getExportTimestampPrefix();
       const filename = `${timestamp}_k02_backup.json`;
-      const { targetPath } = saveTextToQlvbFolder(jsonStr, filename);
+      const { targetPath, isIframeFallback } = await saveTextToQlvbFolder(
+        jsonStr,
+        filename,
+        'application/json',
+        preDirHandle
+      );
       markWeeklyBackupCompleted();
 
       playSuccessChime();
       notifyAndroidNative(
         'K02 Mobile - Sao lưu JSON thành công',
-        `Đã lưu "${targetPath}"`
+        `Đã lưu: ${targetPath}`
       );
       setImportStatus({
         type: 'success',
-        message: `Đã xuất file sao lưu vào "${targetPath}" thành công.`,
+        message: isIframeFallback
+          ? `✓ Đã tải file sao lưu "${filename}".\n(Mở ứng dụng ở tab trình duyệt PC riêng để tự động tạo thư mục con Download/QLVB_PRO)`
+          : `✓ Đã xuất file sao lưu JSON thành công!\n📁 Vị trí: ${targetPath}`,
       });
     } catch (error: any) {
+      if (error?.isUserCancelled) return;
       playAlertChime();
       setImportStatus({ type: 'error', message: `Lỗi: ${error.message}` });
     }
@@ -743,7 +782,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
           style={{ top: 'max(3.8rem, calc(env(safe-area-inset-top, 0px) + 3.8rem))' }}
         >
           <div
-            className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 backdrop-blur-md shadow-2xl ${
+            className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 backdrop-blur-md shadow-2xl overflow-hidden ${
               importStatus.type === 'success'
                 ? 'bg-slate-900/95 border-emerald-400 text-emerald-100'
                 : importStatus.type === 'info'
@@ -758,10 +797,12 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
             ) : (
               <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
             )}
-            <div className="flex-1 font-semibold leading-relaxed">{importStatus.message}</div>
+            <div className="flex-1 min-w-0 font-semibold leading-relaxed break-words break-all [overflow-wrap:anywhere] whitespace-pre-line">
+              {importStatus.message}
+            </div>
             <button
               onClick={() => setImportStatus({ type: null, message: '' })}
-              className="text-xs font-black p-1 hover:bg-white/20 rounded-lg text-white"
+              className="text-xs font-black p-1 hover:bg-white/20 rounded-lg text-white shrink-0 ml-1"
             >
               ✕
             </button>
@@ -772,7 +813,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       {/* Top Status banner */}
       {importStatus.type && (
         <div
-          className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 animate-fadeIn ${
+          className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 animate-fadeIn overflow-hidden ${
             importStatus.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
               : importStatus.type === 'info'
@@ -787,10 +828,12 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
           ) : (
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
           )}
-          <div className="flex-1 font-medium">{importStatus.message}</div>
+          <div className="flex-1 min-w-0 font-medium break-words break-all [overflow-wrap:anywhere] whitespace-pre-line">
+            {importStatus.message}
+          </div>
           <button
             onClick={() => setImportStatus({ type: null, message: '' })}
-            className="text-xs font-bold opacity-60 hover:opacity-100"
+            className="text-xs font-bold opacity-60 hover:opacity-100 shrink-0 ml-1"
           >
             ✕
           </button>
@@ -1304,18 +1347,20 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
 
             {importStatus.type && (
               <div
-                className={`p-2.5 rounded-xl border text-xs flex items-center gap-2 animate-fadeIn ${
+                className={`p-2.5 rounded-xl border text-xs flex items-start gap-2 animate-fadeIn overflow-hidden ${
                   importStatus.type === 'success'
                     ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                     : 'bg-rose-50 border-rose-200 text-rose-800'
                 }`}
               >
                 {importStatus.type === 'success' ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                 ) : (
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                 )}
-                <span className="font-semibold text-[11px] leading-tight">{importStatus.message}</span>
+                <span className="flex-1 min-w-0 font-semibold text-[11px] leading-snug break-words break-all [overflow-wrap:anywhere] whitespace-pre-line">
+                  {importStatus.message}
+                </span>
               </div>
             )}
           </div>
@@ -1382,18 +1427,20 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
 
         {importStatus.type && (
           <div
-            className={`p-2.5 rounded-xl border text-xs flex items-center gap-2 animate-fadeIn ${
+            className={`p-2.5 rounded-xl border text-xs flex items-start gap-2 animate-fadeIn overflow-hidden ${
               importStatus.type === 'success'
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                 : 'bg-rose-50 border-rose-200 text-rose-800'
             }`}
           >
             {importStatus.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
             )}
-            <span className="font-semibold text-[11px] leading-tight">{importStatus.message}</span>
+            <span className="flex-1 min-w-0 font-semibold text-[11px] leading-snug break-words break-all [overflow-wrap:anywhere] whitespace-pre-line">
+              {importStatus.message}
+            </span>
           </div>
         )}
       </div>

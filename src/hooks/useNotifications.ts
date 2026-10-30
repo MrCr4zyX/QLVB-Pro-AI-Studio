@@ -368,6 +368,11 @@ export function useNotifications(reports: EnrichedReport[]) {
     () => getLatestMondayBackupSlot(new Date()).slotKey
   );
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(() => getLastBackupTimestamp());
+  const [dismissedSlotKey, setDismissedSlotKey] = useState<string | null>(null);
+
+  const dismissScheduledBackupReminder = useCallback(() => {
+    setDismissedSlotKey(weeklyBackupCycleKey);
+  }, [weeklyBackupCycleKey]);
 
   useEffect(() => {
     const handleBackupUpdate = () => {
@@ -383,11 +388,12 @@ export function useNotifications(reports: EnrichedReport[]) {
 
   // Weekly backup is due if no backup has been performed since the latest Monday 10:00 AM
   const isBackupReminderDue = useMemo(() => {
+    if (dismissedSlotKey === weeklyBackupCycleKey) return false;
     if (!lastBackupAt) return true;
     const backupTime = new Date(lastBackupAt).getTime();
     if (Number.isNaN(backupTime)) return true;
     return backupTime < latestMonday10AM.getTime();
-  }, [lastBackupAt, latestMonday10AM]);
+  }, [lastBackupAt, latestMonday10AM, dismissedSlotKey, weeklyBackupCycleKey]);
 
   const alertReports = useMemo(() => {
     const date = new Date(`${today}T12:00:00`);
@@ -484,33 +490,19 @@ export function useNotifications(reports: EnrichedReport[]) {
 
   // Push startup notification to phone Status Bar once per session when alerts exist
   useEffect(() => {
-    if (alertReports.length === 0 && !isBackupReminderDue) return;
+    if (alertReports.length === 0) return;
     if (permission !== 'granted' && !hasAndroidBridge()) return;
     const startupPushKey = 'k02_startup_statusbar_pushed';
     if (sessionStorage.getItem(startupPushKey)) return;
     sessionStorage.setItem(startupPushKey, 'true');
 
-    if (alertReports.length > 0) {
-      const msg =
-        overdueCount > 0
-          ? `Có ${overdueCount} báo cáo quá hạn và ${alertReports.length - overdueCount} báo cáo sắp đến hạn!`
-          : `Có ${alertReports.length} kỳ báo cáo sắp đến hạn trong 30 ngày tới.`;
+    const msg =
+      overdueCount > 0
+        ? `Có ${overdueCount} báo cáo quá hạn và ${alertReports.length - overdueCount} báo cáo sắp đến hạn!`
+        : `Có ${alertReports.length} kỳ báo cáo sắp đến hạn trong 30 ngày tới.`;
 
-      void sendSystemPushNotification('🔔 Cảnh báo hạn báo cáo K02', msg, false);
-    }
-
-    if (isBackupReminderDue) {
-      const weeklyPushKey = `k02_weekly_backup_push_${weeklyBackupCycleKey}`;
-      if (!localStorage.getItem(weeklyPushKey)) {
-        localStorage.setItem(weeklyPushKey, 'true');
-        void sendSystemPushNotification(
-          '⚠️ CẢNH BÁO! Sao lưu dữ liệu K02',
-          'Hãy sao lưu dữ liệu định kỳ! (Nhắc lịch 10:00 & 15:00 Thứ 2 hàng tuần)',
-          false
-        );
-      }
-    }
-  }, [alertReports.length, overdueCount, permission, isBackupReminderDue, weeklyBackupCycleKey]);
+    void sendSystemPushNotification('🔔 Cảnh báo hạn báo cáo K02', msg, false);
+  }, [alertReports.length, overdueCount, permission]);
 
   useEffect(() => {
     if (!NATIVE || permission !== 'granted') return;
@@ -535,7 +527,7 @@ export function useNotifications(reports: EnrichedReport[]) {
       const slot = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
       // Monday 10:00 AM & 15:00 PM weekly backup push check
-      if (now.getDay() === 1 && (now.getHours() >= 10 || now.getHours() >= 15)) {
+      if (now.getDay() === 1 && (now.getHours() === 10 || now.getHours() === 15)) {
         const weeklyPushKey = `k02_weekly_backup_push_${slotKey}`;
         const lastBackup = getLastBackupTimestamp();
         const backedUpThisCycle =
@@ -578,7 +570,7 @@ export function useNotifications(reports: EnrichedReport[]) {
     totalAlertsCount: alertReports.length,
     isBackupReminderDue,
     weeklyBackupCycleKey,
-    lastBackupAt,
+    dismissScheduledBackupReminder,
     permission,
     requestPermission,
     sendSystemPushNotification,
