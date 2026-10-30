@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { saveWorkbookToQlvbFolder } from './fileExportUtils';
 import {
   Document,
   Schedule,
@@ -144,17 +145,11 @@ export function buildExcelWorkbook(state: AppDataState): XLSX.WorkBook {
 }
 
 /**
- * Export current database state into a PC-compatible .xlsx file (downloads to browser or Android Download folder)
+ * Export current database state into a PC-compatible .xlsx file inside Download/QLVB_PRO
  */
 export function exportToExcel(state: AppDataState, filename = 'documents.xlsx') {
   const wb = buildExcelWorkbook(state);
-  const bridge = typeof window !== 'undefined' ? (window as any).AndroidBridge : null;
-  if (bridge && typeof bridge.saveBase64File === 'function') {
-    const base64Data = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
-    const saved = bridge.saveBase64File(base64Data, filename);
-    if (saved) return state.documents.length;
-  }
-  XLSX.writeFile(wb, filename);
+  saveWorkbookToQlvbFolder(wb, filename);
   return state.documents.length;
 }
 

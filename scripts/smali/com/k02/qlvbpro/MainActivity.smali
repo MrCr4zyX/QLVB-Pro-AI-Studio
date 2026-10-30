@@ -304,7 +304,7 @@
 
     move-result-object v1
     :try_end_5
-    .catch Ljava/lang/Throwable; {:try_start_1 .. :try_end_5} :catch_4d
+    .catch Ljava/lang/Throwable; {:try_start_1 .. :try_end_5} :catch_59
 
     :try_start_5
     sget-object v2, Landroid/os/Environment;->DIRECTORY_DOWNLOADS:Ljava/lang/String;
@@ -319,6 +319,15 @@
 
     invoke-direct {v3, v2, p2}, Ljava/io/File;-><init>(Ljava/io/File;Ljava/lang/String;)V
 
+    invoke-virtual {v3}, Ljava/io/File;->getParentFile()Ljava/io/File;
+
+    move-result-object v2
+
+    if-eqz v2, :cond_1e
+
+    invoke-virtual {v2}, Ljava/io/File;->mkdirs()Z
+
+    :cond_1e
     new-instance v2, Ljava/io/FileOutputStream;
 
     invoke-direct {v2, v3}, Ljava/io/FileOutputStream;-><init>(Ljava/io/File;)V
@@ -328,11 +337,11 @@
     invoke-virtual {v2}, Ljava/io/FileOutputStream;->flush()V
 
     invoke-virtual {v2}, Ljava/io/FileOutputStream;->close()V
-    :try_end_23
-    .catch Ljava/lang/Throwable; {:try_start_5 .. :try_end_23} :catch_2b
+    :try_end_2f
+    .catch Ljava/lang/Throwable; {:try_start_5 .. :try_end_2f} :catch_37
 
-    :goto_23
-    const-string v2, "\u0110\u00e3 l\u01b0u t\u1ec7p v\u00e0o th\u01b0 m\u1ee5c Download"
+    :goto_2f
+    const-string v2, "\u0110\u00e3 l\u01b0u t\u1ec7p v\u00e0o Download/QLVB_PRO"
 
     invoke-direct {p0, v2, p2}, Lcom/k02/qlvbpro/MainActivity;->triggerNativeNotification(Ljava/lang/String;Ljava/lang/String;)V
 
@@ -340,17 +349,17 @@
 
     return v0
 
-    :catch_2b
+    :catch_37
     move-exception v2
 
-    :try_start_2c
+    :try_start_38
     sget-object v2, Landroid/os/Environment;->DIRECTORY_DOWNLOADS:Ljava/lang/String;
 
     invoke-virtual {p0, v2}, Lcom/k02/qlvbpro/MainActivity;->getExternalFilesDir(Ljava/lang/String;)Ljava/io/File;
 
     move-result-object v2
 
-    if-eqz v2, :cond_4e
+    if-eqz v2, :cond_5a
 
     invoke-virtual {v2}, Ljava/io/File;->mkdirs()Z
 
@@ -358,6 +367,15 @@
 
     invoke-direct {v3, v2, p2}, Ljava/io/File;-><init>(Ljava/io/File;Ljava/lang/String;)V
 
+    invoke-virtual {v3}, Ljava/io/File;->getParentFile()Ljava/io/File;
+
+    move-result-object v2
+
+    if-eqz v2, :cond_4d
+
+    invoke-virtual {v2}, Ljava/io/File;->mkdirs()Z
+
+    :cond_4d
     new-instance v2, Ljava/io/FileOutputStream;
 
     invoke-direct {v2, v3}, Ljava/io/FileOutputStream;-><init>(Ljava/io/File;)V
@@ -367,15 +385,15 @@
     invoke-virtual {v2}, Ljava/io/FileOutputStream;->flush()V
 
     invoke-virtual {v2}, Ljava/io/FileOutputStream;->close()V
-    :try_end_4b
-    .catch Ljava/lang/Throwable; {:try_start_2c .. :try_end_4b} :catch_4d
+    :try_end_57
+    .catch Ljava/lang/Throwable; {:try_start_38 .. :try_end_57} :catch_59
 
-    goto :goto_23
+    goto :goto_2f
 
-    :catch_4d
+    :catch_59
     move-exception v1
 
-    :cond_4e
+    :cond_5a
     return v0
 .end method
 

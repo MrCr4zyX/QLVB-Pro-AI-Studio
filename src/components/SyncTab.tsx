@@ -35,6 +35,13 @@ import {
 } from '../utils/excelSync';
 import { generateInitialData } from '../services/storageService';
 import { playSuccessChime, playAlertChime, notifyAndroidNative } from '../utils/soundUtils';
+import { markWeeklyBackupCompleted } from '../hooks/useNotifications';
+import {
+  getExportTimestampPrefix,
+  QLVB_EXPORT_PATH_LABEL,
+  saveArrayBufferToQlvbFolder,
+  saveTextToQlvbFolder,
+} from '../utils/fileExportUtils';
 import {
   googleSignIn,
   googleSignInRedirect,
@@ -440,6 +447,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         }
       }
 
+      markWeeklyBackupCompleted();
       setImportStatus({
         type: 'success',
         message: `Đã sao lưu thành công tệp "${uploadedFile.name}" vào thư mục Backup_QLVB_Pro trên Google Drive!`,
@@ -553,33 +561,10 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         }
       }
 
-      const bridge = typeof window !== 'undefined' ? (window as any).AndroidBridge : null;
-      if (bridge && typeof bridge.saveBase64File === 'function') {
-        const bytes = new Uint8Array(arrayBuffer);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const base64Data = window.btoa(binary);
-        bridge.saveBase64File(base64Data, file.name);
-      } else {
-        const blob = new Blob([arrayBuffer], {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, 2000);
-      }
+      const { targetPath } = saveArrayBufferToQlvbFolder(arrayBuffer, file.name);
       setImportStatus({
         type: 'info',
-        message: `Đã tải bản sao lưu "${file.name}" về thư mục Tải xuống (Download) trên thiết bị.`,
+        message: `Đã lưu bản sao lưu vào "${targetPath}" trên thiết bị.`,
       });
     } catch (err: any) {
       if (err?.isAuthError) setUser(null);
@@ -631,19 +616,19 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
   // Local Excel export
   const handleExportExcel = () => {
     try {
-      const now = new Date();
-      const pad = (n: number) => n.toString().padStart(2, '0');
-      const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const timestamp = getExportTimestampPrefix();
       const filename = `${timestamp}_documents.xlsx`;
       const count = exportToExcel(appState, filename);
+      const targetPath = `${QLVB_EXPORT_PATH_LABEL}/${filename}`;
+      markWeeklyBackupCompleted();
       playSuccessChime();
       notifyAndroidNative(
         'K02 Mobile - Xuất Excel thành công',
-        `Đã lưu tệp "${filename}" (${count} văn bản)`
+        `Đã lưu "${targetPath}" (${count} văn bản)`
       );
       setImportStatus({
         type: 'success',
-        message: `Đã xuất ${count} văn bản ra file "${filename}" thành công. Bạn có thể sao chép file này vào máy tính để nhập lại vào phần mềm PC.`,
+        message: `Đã xuất ${count} văn bản vào "${targetPath}" thành công. Bạn có thể sao chép file này vào máy tính để nhập lại vào phần mềm PC.`,
       });
     } catch (error: any) {
       playAlertChime();
@@ -657,46 +642,19 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
   const handleExportJSON = () => {
     try {
       const jsonStr = JSON.stringify(appState, null, 2);
-      const filename = `k02_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      const bridge = typeof window !== 'undefined' ? (window as any).AndroidBridge : null;
-      let bridgeSaved = false;
-
-      if (bridge && typeof bridge.saveBase64File === 'function') {
-        try {
-          const bytes = new TextEncoder().encode(jsonStr);
-          let binary = '';
-          for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          const base64Data = window.btoa(binary);
-          bridgeSaved = Boolean(bridge.saveBase64File(base64Data, filename));
-        } catch (bridgeErr) {
-          console.warn('Native saveBase64File error, falling back to blob download:', bridgeErr);
-        }
-      }
-
-      if (!bridgeSaved) {
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, 2000);
-      }
+      const timestamp = getExportTimestampPrefix();
+      const filename = `${timestamp}_k02_backup.json`;
+      const { targetPath } = saveTextToQlvbFolder(jsonStr, filename);
+      markWeeklyBackupCompleted();
 
       playSuccessChime();
       notifyAndroidNative(
         'K02 Mobile - Sao lưu JSON thành công',
-        `Đã lưu tệp sao lưu "${filename}"`
+        `Đã lưu "${targetPath}"`
       );
       setImportStatus({
         type: 'success',
-        message: `Đã xuất file sao lưu "${filename}" thành công.`,
+        message: `Đã xuất file sao lưu vào "${targetPath}" thành công.`,
       });
     } catch (error: any) {
       playAlertChime();

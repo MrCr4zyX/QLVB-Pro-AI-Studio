@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, AlertTriangle, X, Volume2, ArrowRight } from 'lucide-react';
+import { AlertTriangle, X, Volume2, ArrowRight, ChevronRight, DatabaseBackup } from 'lucide-react';
 import { playAlertChime } from '../utils/soundUtils';
 import { sendSystemPushNotification } from '../hooks/useNotifications';
 import appLogo from '../assets/app-logo.png';
@@ -7,32 +7,50 @@ import appLogo from '../assets/app-logo.png';
 interface FloatingNotificationProps {
   overdueCount: number;
   urgentCount: number;
+  isBackupReminderDue: boolean;
+  weeklyBackupCycleKey: string;
   onOpenDetails: () => void;
+  onBackupNow: () => void;
 }
 
 export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
   overdueCount,
   urgentCount,
+  isBackupReminderDue,
+  weeklyBackupCycleKey,
   onOpenDetails,
+  onBackupNow,
 }) => {
   const [isVisible, setIsVisible] = useState(false);
-  const [hasInteracted, setHasInteracted] = useState(false);
+  const [dismissedCycleKey, setDismissedCycleKey] = useState<string | null>(null);
+  const [hasInteractedWithReports, setHasInteractedWithReports] = useState(false);
 
   const totalUrgent = overdueCount + urgentCount;
+  const showBackupAlert = isBackupReminderDue && dismissedCycleKey !== weeklyBackupCycleKey;
+  const showReportAlert = totalUrgent > 0 && !hasInteractedWithReports;
+  const shouldShowBanner = showBackupAlert || showReportAlert;
 
   useEffect(() => {
-    // Show floating alert whenever there are overdue or urgent items
-    if (totalUrgent > 0 && !hasInteracted) {
+    if (shouldShowBanner) {
       const timer = setTimeout(() => {
         setIsVisible(true);
-        // Play alert sound chime
         playAlertChime();
-      }, 1000);
+      }, 800);
       return () => clearTimeout(timer);
+    } else {
+      setIsVisible(false);
     }
-  }, [totalUrgent, hasInteracted]);
+  }, [shouldShowBanner, weeklyBackupCycleKey]);
 
-  if (!isVisible || totalUrgent === 0) return null;
+  const handleDismiss = () => {
+    setIsVisible(false);
+    setHasInteractedWithReports(true);
+    if (isBackupReminderDue) {
+      setDismissedCycleKey(weeklyBackupCycleKey);
+    }
+  };
+
+  if (!isVisible || !shouldShowBanner) return null;
 
   return (
     <div
@@ -56,36 +74,43 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
               <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-600 rounded-full border-2 border-slate-900" />
             </div>
 
-            <div>
-              <div className="flex items-center gap-1.5">
+            <div className="min-w-0">
+              <div className="flex items-center flex-wrap gap-1.5">
                 <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-red-600 text-white tracking-wider flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3" />
                   <span>CẢNH BÁO!</span>
                 </span>
                 <span className="text-[11px] font-bold text-amber-300">
-                  Thời hạn K02
+                  {showBackupAlert ? 'Định kỳ 10:00 & 15:00 Thứ 2' : 'Thời hạn K02'}
                 </span>
               </div>
-              <p className="text-xs font-semibold text-slate-100 mt-0.5 leading-snug">
-                {overdueCount > 0 ? (
-                  <span>
-                    Có <strong className="text-red-400 font-black">{overdueCount}</strong> báo cáo quá hạn,{' '}
-                    <strong className="text-amber-300 font-bold">{urgentCount}</strong> hạn gấp (≤ 7 ngày)!
-                  </span>
-                ) : (
-                  <span>
-                    Có <strong className="text-amber-300 font-black">{urgentCount}</strong> báo cáo sắp đến hạn gấp (≤ 7 ngày)!
-                  </span>
-                )}
-              </p>
+
+              {showBackupAlert && (
+                <p className="text-xs font-extrabold text-amber-200 mt-1 leading-snug flex items-center gap-1">
+                  <DatabaseBackup className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Hãy sao lưu dữ liệu định kỳ!</span>
+                </p>
+              )}
+
+              {showReportAlert && (
+                <p className="text-[11px] font-semibold text-slate-200 mt-0.5 leading-snug">
+                  {overdueCount > 0 ? (
+                    <span>
+                      Có <strong className="text-red-400 font-black">{overdueCount}</strong> báo cáo quá hạn,{' '}
+                      <strong className="text-amber-300 font-bold">{urgentCount}</strong> hạn gấp (≤ 7 ngày)!
+                    </span>
+                  ) : (
+                    <span>
+                      Có <strong className="text-amber-300 font-black">{urgentCount}</strong> báo cáo sắp đến hạn gấp (≤ 7 ngày)!
+                    </span>
+                  )}
+                </p>
+              )}
             </div>
           </div>
 
           <button
-            onClick={() => {
-              setIsVisible(false);
-              setHasInteracted(true);
-            }}
+            onClick={handleDismiss}
             className="p-1.5 rounded-full hover:bg-white/20 text-slate-300 hover:text-white transition shrink-0"
             aria-label="Đóng thông báo nổi"
           >
@@ -98,14 +123,21 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
           <button
             onClick={() => {
               playAlertChime();
-              void sendSystemPushNotification(
-                '🔔 Cảnh báo hạn báo cáo K02',
-                overdueCount > 0
-                  ? `Có ${overdueCount} báo cáo quá hạn và ${urgentCount} báo cáo sắp đến hạn!`
-                  : `Có ${urgentCount} báo cáo sắp đến hạn gấp!`
-              );
+              if (showBackupAlert) {
+                void sendSystemPushNotification(
+                  '⚠️ CẢNH BÁO! Sao lưu dữ liệu K02',
+                  'Hãy sao lưu dữ liệu định kỳ! (Nhắc lịch 10:00 & 15:00 Thứ 2 hàng tuần)'
+                );
+              } else {
+                void sendSystemPushNotification(
+                  '🔔 Cảnh báo hạn báo cáo K02',
+                  overdueCount > 0
+                    ? `Có ${overdueCount} báo cáo quá hạn và ${urgentCount} báo cáo sắp đến hạn!`
+                    : `Có ${urgentCount} báo cáo sắp đến hạn gấp!`
+                );
+              }
             }}
-            className="flex items-center gap-1 text-[11px] text-amber-300 hover:text-amber-200 py-1 px-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 transition font-medium"
+            className="flex items-center gap-1 text-[11px] text-amber-300 hover:text-amber-200 py-1 px-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 transition font-medium shrink-0"
             title="Phát âm thanh và đẩy thông báo lên thanh trạng thái"
           >
             <Volume2 className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
@@ -114,26 +146,48 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
 
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => {
-                setIsVisible(false);
-                setHasInteracted(true);
-              }}
-              className="text-[11px] text-slate-300 hover:text-white px-2.5 py-1 rounded-lg transition"
+              onClick={handleDismiss}
+              className="text-[11px] text-slate-300 hover:text-white px-2 py-1 rounded-lg transition"
             >
               Để sau
             </button>
 
-            <button
-              onClick={() => {
-                setIsVisible(false);
-                setHasInteracted(true);
-                onOpenDetails();
-              }}
-              className="flex items-center gap-1 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-xs px-3 py-1 rounded-xl shadow-xs transition active:scale-95"
-            >
-              <span>Xem ngay</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+            {showReportAlert && showBackupAlert && (
+              <button
+                onClick={() => {
+                  setIsVisible(false);
+                  setHasInteractedWithReports(true);
+                  onOpenDetails();
+                }}
+                className="text-[11px] font-bold text-amber-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-xl transition active:scale-95"
+              >
+                Xem hạn
+              </button>
+            )}
+
+            {showBackupAlert ? (
+              <button
+                onClick={() => {
+                  handleDismiss();
+                  onBackupNow();
+                }}
+                className="flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-xs px-3 py-1 rounded-xl shadow-xs transition active:scale-95"
+              >
+                <span>Sao lưu ngay</span>
+                <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  handleDismiss();
+                  onOpenDetails();
+                }}
+                className="flex items-center gap-1 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-xs px-3 py-1 rounded-xl shadow-xs transition active:scale-95"
+              >
+                <span>Xem ngay</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -1,9 +1,10 @@
 import { FullTextPopover } from './FullTextPopover';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   BarChart3,
   Download,
   CheckCircle,
+  CheckCircle2,
   AlertCircle,
   HelpCircle,
   FileText,
@@ -16,6 +17,11 @@ import {
 import * as XLSX from 'xlsx';
 import { EnrichedDocument, DocumentType, WorkField } from '../types';
 import { displayDate, formatDocCode } from '../utils/dateUtils';
+import { playSuccessChime, playAlertChime, notifyAndroidNative } from '../utils/soundUtils';
+import {
+  getExportTimestampPrefix,
+  saveWorkbookToQlvbFolder,
+} from '../utils/fileExportUtils';
 
 interface StatisticsTabProps {
   documents: EnrichedDocument[];
@@ -33,6 +39,16 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   const [activeStatus, setActiveStatus] = useState<string>('Tất cả');
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedField, setSelectedField] = useState<string | null>(null);
+  const [exportNotice, setExportNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!exportNotice) return;
+    const timer = setTimeout(() => setExportNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [exportNotice]);
 
   // Counts by validity status
   const statusStats = useMemo(() => {
@@ -77,54 +93,74 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
   }, [documents]);
 
-  // Export summary Excel
+  // Export summary Excel (supports both Android APK native bridge and Web/PWA browser download)
   const exportStatisticsExcel = () => {
-    const wb = XLSX.utils.book_new();
+    try {
+      const wb = XLSX.utils.book_new();
 
-    // Summary sheet
-    const summaryData = [
-      ['Chỉ tiêu', 'Số lượng'],
-      ['Tổng số văn bản', statusStats.total],
-      ['Còn hiệu lực', statusStats.valid],
-      ['Hết hiệu lực', statusStats.expired],
-      ['Cần rà soát', statusStats.review],
-    ];
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'TONG_HOP');
+      // Summary sheet
+      const summaryData = [
+        ['Chỉ tiêu', 'Số lượng'],
+        ['Tổng số văn bản', statusStats.total],
+        ['Còn hiệu lực', statusStats.valid],
+        ['Hết hiệu lực', statusStats.expired],
+        ['Cần rà soát', statusStats.review],
+      ];
+      const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(wb, wsSummary, 'TONG_HOP');
 
-    // Type sheet
-    const typeData = [['Loại văn bản', 'Số văn bản'], ...typeBreakdown];
-    const wsType = XLSX.utils.aoa_to_sheet(typeData);
-    XLSX.utils.book_append_sheet(wb, wsType, 'THEO_LOAI');
+      // Type sheet
+      const typeData = [['Loại văn bản', 'Số văn bản'], ...typeBreakdown];
+      const wsType = XLSX.utils.aoa_to_sheet(typeData);
+      XLSX.utils.book_append_sheet(wb, wsType, 'THEO_LOAI');
 
-    // Field sheet
-    const fieldData = [['Lĩnh vực', 'Số văn bản'], ...fieldBreakdown];
-    const wsField = XLSX.utils.aoa_to_sheet(fieldData);
-    XLSX.utils.book_append_sheet(wb, wsField, 'THEO_LINH_VUC');
+      // Field sheet
+      const fieldData = [['Lĩnh vực', 'Số văn bản'], ...fieldBreakdown];
+      const wsField = XLSX.utils.aoa_to_sheet(fieldData);
+      XLSX.utils.book_append_sheet(wb, wsField, 'THEO_LINH_VUC');
 
-    // Agency sheet
-    const agencyData = [['Cơ quan', 'Số văn bản'], ...agencyBreakdown];
-    const wsAgency = XLSX.utils.aoa_to_sheet(agencyData);
-    XLSX.utils.book_append_sheet(wb, wsAgency, 'THEO_CO_QUAN');
+      // Agency sheet
+      const agencyData = [['Cơ quan', 'Số văn bản'], ...agencyBreakdown];
+      const wsAgency = XLSX.utils.aoa_to_sheet(agencyData);
+      XLSX.utils.book_append_sheet(wb, wsAgency, 'THEO_CO_QUAN');
 
-    // Full doc list sheet
-    const docData = [
-      ['Số/Ký hiệu', 'Trích yếu', 'Cơ quan', 'Ngày ban hành', 'Loại văn bản', 'Lĩnh vực', 'Trạng thái', 'Hạn gần nhất'],
-      ...documents.map((d) => [
-        `${d.number}/${d.symbol}`,
-        d.summary,
-        d.agency,
-        displayDate(d.issued),
-        d.typeName,
-        d.fieldNames.join('; '),
-        d.effect_status,
-        d.nextReportLabel,
-      ]),
-    ];
-    const wsDocs = XLSX.utils.aoa_to_sheet(docData);
-    XLSX.utils.book_append_sheet(wb, wsDocs, 'DANH_SACH');
+      // Full doc list sheet
+      const docData = [
+        ['Số/Ký hiệu', 'Trích yếu', 'Cơ quan', 'Ngày ban hành', 'Loại văn bản', 'Lĩnh vực', 'Trạng thái', 'Hạn gần nhất'],
+        ...documents.map((d) => [
+          `${d.number}/${d.symbol}`,
+          d.summary,
+          d.agency,
+          displayDate(d.issued),
+          d.typeName,
+          d.fieldNames.join('; '),
+          d.effect_status,
+          d.nextReportLabel,
+        ]),
+      ];
+      const wsDocs = XLSX.utils.aoa_to_sheet(docData);
+      XLSX.utils.book_append_sheet(wb, wsDocs, 'DANH_SACH');
 
-    XLSX.writeFile(wb, 'Thong_ke_van_ban_K02.xlsx');
+      const timestamp = getExportTimestampPrefix();
+      const filename = `${timestamp}_ThongKeVanBan.xlsx`;
+      const { targetPath } = saveWorkbookToQlvbFolder(wb, filename);
+
+      playSuccessChime();
+      notifyAndroidNative(
+        'K02 Mobile - Xuất thống kê Excel',
+        `Đã lưu "${targetPath}" (${documents.length} văn bản)`
+      );
+      setExportNotice({
+        type: 'success',
+        message: `Đã xuất tệp thống kê vào "${targetPath}" thành công!`,
+      });
+    } catch (err: any) {
+      playAlertChime();
+      setExportNotice({
+        type: 'error',
+        message: `Lỗi khi xuất tệp thống kê Excel: ${err?.message || 'Không thể ghi tệp'}`,
+      });
+    }
   };
 
   // Administrative priority is a display preference, not a statement of legal hierarchy.
@@ -152,6 +188,34 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
 
   return (
     <div className="pb-24 pt-4 px-4 sm:px-6 max-w-6xl mx-auto space-y-4 flex flex-col min-h-[calc(100vh-100px)]">
+      {exportNotice && (
+        <div
+          className="fixed left-3 right-3 max-w-lg mx-auto z-50 animate-bounce-in shadow-2xl pointer-events-auto"
+          style={{ top: 'max(3.8rem, calc(env(safe-area-inset-top, 0px) + 3.8rem))' }}
+        >
+          <div
+            className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 backdrop-blur-md shadow-2xl ${
+              exportNotice.type === 'success'
+                ? 'bg-slate-900/95 border-emerald-400 text-emerald-100'
+                : 'bg-slate-900/95 border-rose-400 text-rose-100'
+            }`}
+          >
+            {exportNotice.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 font-semibold leading-relaxed">{exportNotice.message}</div>
+            <button
+              onClick={() => setExportNotice(null)}
+              className="text-xs font-black p-1 hover:bg-white/20 rounded-lg text-white"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

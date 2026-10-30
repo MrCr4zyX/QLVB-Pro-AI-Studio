@@ -94,11 +94,11 @@ jobs:
           fi
 
           if [ -f android/app/build.gradle ]; then
-            sed -i 's/versionCode [0-9]\+/versionCode 18/g' android/app/build.gradle
-            sed -i 's/versionName "[^"]*"/versionName "1.8"/g' android/app/build.gradle
+            sed -i 's/versionCode [0-9]\+/versionCode 197/g' android/app/build.gradle
+            sed -i 's/versionName "[^"]*"/versionName "19.7"/g' android/app/build.gradle
           fi
 
-          # Dam bao AndroidManifest.xml co day du quyen thong bao Status Bar cho Android 13/14/15
+          # Dam bao AndroidManifest.xml co day du quyen thong bao Status Bar & luu file Download/QLVB_PRO
           python3 - <<'PY'
           from pathlib import Path
           import xml.etree.ElementTree as ET
@@ -119,13 +119,161 @@ jobs:
                   "android.permission.VIBRATE",
                   "android.permission.RECEIVE_BOOT_COMPLETED",
                   "android.permission.SCHEDULE_EXACT_ALARM",
+                  "android.permission.READ_EXTERNAL_STORAGE",
+                  "android.permission.WRITE_EXTERNAL_STORAGE",
               ]
               for perm in required_perms:
                   if perm not in existing:
                       el = ET.SubElement(root, "uses-permission")
                       el.set(name_attr, perm)
+
+              app_el = root.find("application")
+              if app_el is not None:
+                  app_el.set(f"{{{ANDROID_NS}}}requestLegacyExternalStorage", "true")
+                  for act in app_el.findall("activity"):
+                      has_auth_scheme = False
+                      for ifilter in act.findall("intent-filter"):
+                          for data_el in ifilter.findall("data"):
+                              if data_el.get(f"{{{ANDROID_NS}}}scheme") == "k02qlvb":
+                                  has_auth_scheme = True
+                      if not has_auth_scheme:
+                          ifilter = ET.SubElement(act, "intent-filter")
+                          act_el = ET.SubElement(ifilter, "action")
+                          act_el.set(name_attr, "android.intent.action.VIEW")
+                          cat_def = ET.SubElement(ifilter, "category")
+                          cat_def.set(name_attr, "android.intent.category.DEFAULT")
+                          cat_brw = ET.SubElement(ifilter, "category")
+                          cat_brw.set(name_attr, "android.intent.category.BROWSABLE")
+                          data_el = ET.SubElement(ifilter, "data")
+                          data_el.set(f"{{{ANDROID_NS}}}scheme", "k02qlvb")
+                          data_el.set(f"{{{ANDROID_NS}}}host", "auth")
+                          break
+
               tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
-              print("Updated AndroidManifest.xml notification permissions")
+              print("Updated AndroidManifest.xml permissions and deep-link intent-filter")
+
+          # Inject AndroidBridge into Capacitor MainActivity.java so saveBase64File writes directly to Download/QLVB_PRO
+          java_dir = Path("android/app/src/main/java/com/k02/qlvbpro")
+          java_dir.mkdir(parents=True, exist_ok=True)
+          main_activity_java = java_dir / "MainActivity.java"
+          main_activity_java.write_text("""package com.k02.qlvbpro;
+
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.util.Base64;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import com.getcapacitor.BridgeActivity;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+
+public class MainActivity extends BridgeActivity {
+    private String pendingAuthUri = null;
+
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        captureAuthIntent(getIntent());
+        if (this.bridge != null && this.bridge.getWebView() != null) {
+            WebView webView = this.bridge.getWebView();
+            webView.addJavascriptInterface(new K02AndroidBridge(), "AndroidBridge");
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        captureAuthIntent(intent);
+    }
+
+    private void captureAuthIntent(Intent intent) {
+        if (intent == null) return;
+        Uri data = intent.getData();
+        if (data != null && "k02qlvb".equals(data.getScheme())) {
+            pendingAuthUri = data.toString();
+        }
+    }
+
+    public class K02AndroidBridge {
+        @JavascriptInterface
+        public boolean saveBase64File(String base64Data, String filename) {
+            try {
+                byte[] bytes = Base64.decode(base64Data, Base64.DEFAULT);
+                String cleanName = filename == null ? "export.xlsx" : filename.trim();
+                if (cleanName.startsWith("QLVB_PRO/")) {
+                    cleanName = cleanName.substring("QLVB_PRO/".length());
+                }
+                String mime = cleanName.endsWith(".json")
+                    ? "application/json"
+                    : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ContentResolver resolver = getContentResolver();
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, cleanName);
+                    values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+                    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/QLVB_PRO");
+                    Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (uri != null) {
+                        try (OutputStream out = resolver.openOutputStream(uri)) {
+                            if (out != null) {
+                                out.write(bytes);
+                                out.flush();
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                File qlvbDir = new File(downloadsDir, "QLVB_PRO");
+                if (!qlvbDir.exists()) qlvbDir.mkdirs();
+                File outFile = new File(qlvbDir, cleanName);
+                try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                    fos.write(bytes);
+                    fos.flush();
+                    return true;
+                }
+            } catch ( Throwable t ) {
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public void openExternalBrowser(String url) {
+            try {
+                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            } catch (Exception ignored) {}
+        }
+
+        @JavascriptInterface
+        public void showNotification(String title, String body) {}
+
+        @JavascriptInterface
+        public boolean hasPendingAuthUri() {
+            return pendingAuthUri != null && !pendingAuthUri.isEmpty();
+        }
+
+        @JavascriptInterface
+        public String consumePendingAuthUri() {
+            String u = pendingAuthUri;
+            pendingAuthUri = null;
+            return u != null ? u : "";
+        }
+    }
+}
+""", encoding="utf-8")
+          print("Injected K02AndroidBridge into MainActivity.java")
           PY
 
           npx cap sync android

@@ -895,8 +895,8 @@ export async function uploadApkToDrive(
   }
 
   if (onStatusUpdate) onStatusUpdate('Đang tải tệp APK từ bộ nhớ ứng dụng...');
-  let apkRes = await fetch('./k02_mobile_qlvb_19.6.apk');
-  if (!apkRes.ok) apkRes = await fetch('./k02_mobile_qlvb_19.5.apk');
+  let apkRes = await fetch('./k02_mobile_qlvb_19.7.apk');
+  if (!apkRes.ok) apkRes = await fetch('./k02_mobile_qlvb_19.6.apk');
   if (!apkRes.ok) apkRes = await fetch('./k02_mobile_qlvb.apk');
   if (!apkRes.ok) {
     throw new Error('Không tìm thấy tệp APK nội bộ để tải lên.');
@@ -906,8 +906,8 @@ export async function uploadApkToDrive(
   if (onStatusUpdate) onStatusUpdate(`Đang tải lên Google Drive (${(apkBlob.size / (1024 * 1024)).toFixed(1)} MB)...`);
 
   const metadata = {
-    name: 'k02_mobile_qlvb_19.6.apk',
-    description: 'Ứng dụng Quản lý văn bản K02 Mobile trên Android (v19.6)',
+    name: 'k02_mobile_qlvb_19.7.apk',
+    description: 'Ứng dụng Quản lý văn bản K02 Mobile trên Android (v19.7)',
     mimeType: 'application/vnd.android.package-archive',
   };
 
