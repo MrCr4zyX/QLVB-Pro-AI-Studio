@@ -253,10 +253,11 @@ export async function saveBase64ToQlvbFolder(
 
   const bytes = base64ToUint8Array(base64Data);
 
-  // 3. PC Browser File System Access API (creates real Download/QLVB_PRO subfolder)
-  if (typeof window !== 'undefined' && typeof (window as any).showDirectoryPicker === 'function') {
+  // 3. PC Browser File System Access API
+  if (typeof window !== 'undefined' && window.self === window.top) {
+    // 3a. Use pre-acquired or saved directory handle if available
     try {
-      const qlvbDirHandle = preAcquiredDirHandle || (await ensurePcQlvbDirectoryHandle(false));
+      const qlvbDirHandle = preAcquiredDirHandle || (inMemoryRootHandle ? await ensurePcQlvbDirectoryHandle(false) : null);
       if (qlvbDirHandle) {
         const fileHandle = await qlvbDirHandle.getFileHandle(cleanName, { create: true });
         const writable = await fileHandle.createWritable();
@@ -269,16 +270,51 @@ export async function saveBase64ToQlvbFolder(
         };
       }
     } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        const cancelErr = new Error('Đã hủy chọn thư mục lưu tệp.');
+      if (err?.name === 'AbortError' || err?.isUserCancelled) {
+        const cancelErr = new Error('Đã hủy thao tác lưu tệp.');
         (cancelErr as any).isUserCancelled = true;
         throw cancelErr;
       }
-      console.warn('showDirectoryPicker failed or blocked by iframe, falling back to browser download:', err);
+    }
+
+    // 3b. Use native OS File Picker (showSaveFilePicker) on PC Desktop (allows saving directly into QLVB_PRO)
+    if (typeof (window as any).showSaveFilePicker === 'function') {
+      try {
+        const ext = cleanName.endsWith('.json') ? '.json' : cleanName.endsWith('.csv') ? '.csv' : '.xlsx';
+        const fileHandle = await (window as any).showSaveFilePicker({
+          suggestedName: cleanName,
+          types: [
+            {
+              description: ext === '.xlsx' ? 'Bảng tính Excel (*.xlsx)' : 'Tệp dữ liệu (*' + ext + ')',
+              accept: {
+                [mimeType]: [ext],
+              },
+            },
+          ],
+        });
+        if (fileHandle) {
+          const writable = await fileHandle.createWritable();
+          await writable.write(bytes);
+          await writable.close();
+          const savedName = fileHandle.name || cleanName;
+          return {
+            savedViaNativeBridge: false,
+            createdSubfolder: true,
+            targetPath: `QLVB_PRO/${savedName}`,
+          };
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          const cancelErr = new Error('Đã hủy thao tác lưu tệp.');
+          (cancelErr as any).isUserCancelled = true;
+          throw cancelErr;
+        }
+        console.warn('showSaveFilePicker failed or was dismissed, falling back to download:', err);
+      }
     }
   }
 
-  // 4. Fallback for cross-origin iframe or mobile browsers without File System Access API
+  // 4. Fallback for mobile browser PWA or legacy browsers without File System Access API
   const blob = new Blob([bytes as unknown as BlobPart], { type: mimeType });
   triggerBrowserDownload(blob, cleanName);
 
