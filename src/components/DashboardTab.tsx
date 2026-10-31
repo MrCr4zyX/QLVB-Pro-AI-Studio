@@ -103,7 +103,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             TỔNG QUAN CÔNG VIỆC
           </h2>
           <p className="text-[11px] text-slate-500 font-medium leading-tight mt-0.5 truncate">
-            Theo dõi tiến độ và Hạn báo cáo
+            Theo Dõi Tiến Độ & Hạn Báo Cáo
           </p>
         </div>
         <button

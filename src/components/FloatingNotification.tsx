@@ -84,7 +84,7 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
                   <span>CẢNH BÁO!</span>
                 </span>
                 <span className="text-[11px] font-bold text-amber-300">
-                  {showBackupAlert ? 'QUẢN LÝ VĂN BẢN & BÁO CÁO' : 'QLVB_PRO'}
+                  {showBackupAlert ? 'QUẢN LÝ VĂN BẢN & BÁO CÁO' : 'Hãy sao lưu dữ liệu định kỳ!'}
                 </span>
               </div>
 
@@ -148,6 +148,7 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
           </button>
 
           <div className="flex items-center gap-1.5">
+            {/* Nút Để sau */}
             <button
               onClick={handleDismiss}
               className="text-[11px] text-slate-300 hover:text-white px-2 py-1 rounded-lg transition"
@@ -155,42 +156,30 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
               Để sau
             </button>
 
-            {showReportAlert && showBackupAlert && (
-              <button
-                onClick={() => {
-                  setIsVisible(false);
-                  setHasInteractedWithReports(true);
-                  onOpenDetails();
-                }}
-                className="text-[11px] font-bold text-amber-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-xl transition active:scale-95"
-              >
-                Xem hạn
-              </button>
-            )}
+            {/* Nút Sao lưu ngay nằm bên trái nút Xem ngay */}
+            <button
+              onClick={() => {
+                handleDismiss();
+                onBackupNow();
+              }}
+              className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-2.5 py-1 rounded-xl shadow-xs transition active:scale-95"
+              title="Mở bảng sao lưu & xuất dữ liệu ngay"
+            >
+              <DatabaseBackup className="w-3.5 h-3.5" />
+              <span>Sao lưu</span>
+            </button>
 
-            {showBackupAlert ? (
-              <button
-                onClick={() => {
-                  handleDismiss();
-                  onBackupNow();
-                }}
-                className="flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-xs px-3 py-1 rounded-xl shadow-xs transition active:scale-95"
-              >
-                <span>Sao lưu ngay</span>
-                <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
-              </button>
-            ) : (
-              <button
-                onClick={() => {
-                  handleDismiss();
-                  onOpenDetails();
-                }}
-                className="flex items-center gap-1 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-xs px-3 py-1 rounded-xl shadow-xs transition active:scale-95"
-              >
-                <span>Xem ngay</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            )}
+            {/* Nút Xem ngay mở chi tiết văn bản/báo cáo */}
+            <button
+              onClick={() => {
+                handleDismiss();
+                onOpenDetails();
+              }}
+              className="flex items-center gap-1 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-xs px-3 py-1 rounded-xl shadow-xs transition active:scale-95"
+            >
+              <span>Xem ngay</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </div>
