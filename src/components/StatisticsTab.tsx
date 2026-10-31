@@ -245,13 +245,45 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             Phân tích hiệu lực, cơ quan và các nhóm lĩnh vực
           </p>
         </div>
-        <button
-          onClick={exportStatisticsExcel}
-          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition active:scale-95"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>Xuất Excel</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          {typeof window !== 'undefined' &&
+            !Boolean((window as any).AndroidBridge) &&
+            typeof (window as any).showDirectoryPicker === 'function' &&
+            window.self === window.top && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const dir = await ensurePcQlvbDirectoryHandle(true);
+                    if (dir) {
+                      const folderLabel = (dir as any).__displayPathPrefix || 'QLVB_PRO';
+                      setExportNotice({
+                        type: 'success',
+                        message: `✓ Đã liên kết thư mục lưu trữ: ${folderLabel}\nTừ nay mọi file xuất sẽ tự động lưu vào thư mục QLVB_PRO này.`,
+                      });
+                    }
+                  } catch (err: any) {
+                    if (err?.name === 'AbortError' || err?.isUserCancelled) return;
+                    setExportNotice({
+                      type: 'error',
+                      message: `Không thể chọn thư mục gốc hệ thống. Hãy tạo hoặc chọn thư mục con tên "QLVB_PRO" bên trong Downloads.`,
+                    });
+                  }
+                }}
+                className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-[11px] font-semibold px-2.5 py-2 rounded-xl transition active:scale-95"
+                title="Đổi hoặc chọn lại thư mục QLVB_PRO trên máy tính"
+              >
+                <span>📁 Thư mục QLVB_PRO</span>
+              </button>
+            )}
+          <button
+            onClick={exportStatisticsExcel}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition active:scale-95"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Xuất Excel</span>
+          </button>
+        </div>
       </div>
 
       {/* Compact status cards: counts aligned to the right */}

@@ -1411,13 +1411,45 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
               Xuất toàn bộ {appState.documents.length} văn bản và {appState.reports.length} kỳ báo cáo ra file Excel 9 sheet chuẩn (tự động gắn tiền tố thời gian <code>YYYYMMDD_HHmmss_documents.xlsx</code>) để lưu trữ hoặc nhập vào phần mềm PC.
             </p>
 
-            <button
-              onClick={handleExportExcel}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs active:scale-95 transition"
-            >
-              <Download className="w-4 h-4 shrink-0" />
-              <span>Sao lưu file Excel (.xlsx)</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleExportExcel}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs active:scale-95 transition"
+              >
+                <Download className="w-4 h-4 shrink-0" />
+                <span>Sao lưu file Excel (.xlsx)</span>
+              </button>
+
+              {typeof window !== 'undefined' &&
+                !Boolean((window as any).AndroidBridge) &&
+                typeof (window as any).showDirectoryPicker === 'function' &&
+                window.self === window.top && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const dir = await ensurePcQlvbDirectoryHandle(true);
+                        if (dir) {
+                          const folderLabel = (dir as any).__displayPathPrefix || 'QLVB_PRO';
+                          setImportStatus({
+                            type: 'success',
+                            message: `✓ Đã liên kết thư mục lưu trữ: ${folderLabel}\nMọi tệp sao lưu Excel/JSON sẽ tự động lưu vào thư mục QLVB_PRO này.`,
+                          });
+                        }
+                      } catch (err: any) {
+                        if (err?.name === 'AbortError' || err?.isUserCancelled) return;
+                        setImportStatus({
+                          type: 'error',
+                          message: `Trình duyệt chặn chọn trực tiếp gốc Downloads. Hãy tạo thư mục con tên "QLVB_PRO" trong Downloads rồi chọn thư mục đó.`,
+                        });
+                      }
+                    }}
+                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-bold transition active:scale-95"
+                  >
+                    <span>📁 Chọn thư mục QLVB_PRO</span>
+                  </button>
+                )}
+            </div>
 
             {importStatus.type && (
               <div

@@ -117,11 +117,26 @@ if (typeof window !== 'undefined') {
   getSavedRootDirectoryHandle().catch(() => {});
 }
 
+export async function clearSavedPcExportDirectoryHandle(): Promise<void> {
+  inMemoryRootHandle = null;
+  try {
+    const db = await openFsHandleDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(FS_STORE_NAME, 'readwrite');
+      tx.objectStore(FS_STORE_NAME).delete(FS_HANDLE_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch {
+    // Ignore IDB delete error
+  }
+}
+
 export async function getLinkedPcExportFolderName(): Promise<string | null> {
   const handle = inMemoryRootHandle || (await getSavedRootDirectoryHandle());
   if (!handle) return null;
-  const name = String(handle.name || 'Downloads');
-  return name.toUpperCase() === QLVB_EXPORT_FOLDER ? name : `${name}/${QLVB_EXPORT_FOLDER}`;
+  const rawName = String(handle.name || '').trim() || 'Downloads';
+  return rawName.toUpperCase() === QLVB_EXPORT_FOLDER ? rawName : `${rawName}/${QLVB_EXPORT_FOLDER}`;
 }
 
 export function supportsDirectoryPicker(): boolean {
@@ -152,8 +167,9 @@ async function verifyHandleReadWritePermission(handle: any): Promise<boolean> {
 }
 
 /**
- * Obtain or create the "QLVB_PRO" subfolder inside the user's chosen Downloads directory on PC.
- * Call this synchronously at the very start of a user click handler so transient user activation is preserved.
+ * Obtain or create the "QLVB_PRO" subfolder on PC.
+ * - If user selects a parent folder (e.g. Documents / Desktop / D:\), automatically creates child folder "QLVB_PRO" inside it.
+ * - If user is inside Downloads (which Chrome blocks selecting directly) and creates/selects a subfolder, it must be named "QLVB_PRO" (or a child "QLVB_PRO" will be created inside it).
  */
 export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise<any | null> {
   if (typeof window === 'undefined') return null;
@@ -171,14 +187,20 @@ export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise
   if (!forcePickNew) {
     // Use in-memory handle first to avoid IndexedDB async delay consuming user activation
     const cached = inMemoryInitDone ? inMemoryRootHandle : await getSavedRootDirectoryHandle();
-    if (cached && (await verifyHandleReadWritePermission(cached))) {
-      rootHandle = cached;
+    if (cached) {
+      const cachedName = String(cached.name || '').trim();
+      // Reject accidentally cached "New folder" from earlier tests so user isn't stuck with it
+      if (/^new folder/i.test(cachedName)) {
+        await clearSavedPcExportDirectoryHandle();
+      } else if (await verifyHandleReadWritePermission(cached)) {
+        rootHandle = cached;
+      }
     }
   }
 
   if (!rootHandle) {
     rootHandle = await showDirPicker({
-      id: 'k02_qlvb_downloads',
+      id: 'k02_qlvb_pro_folder',
       mode: 'readwrite',
       startIn: 'downloads',
     });
@@ -189,15 +211,23 @@ export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise
 
   if (!rootHandle) return null;
 
-  // Automatically create child folder QLVB_PRO unless the user already selected QLVB_PRO itself
-  if (String(rootHandle.name || '').toUpperCase() === QLVB_EXPORT_FOLDER) {
+  const selectedFolderName = String(rootHandle.name || '').trim();
+  // 1. User directly selected a folder named "QLVB_PRO" (e.g. Downloads/QLVB_PRO) -> save directly inside it
+  if (selectedFolderName.toUpperCase() === QLVB_EXPORT_FOLDER) {
+    (rootHandle as any).__displayPathPrefix = QLVB_EXPORT_FOLDER;
     return rootHandle;
   }
-  return await rootHandle.getDirectoryHandle(QLVB_EXPORT_FOLDER, { create: true });
+
+  // 2. User selected another folder (e.g. Documents, Desktop, D:\, or New folder) -> automatically create "QLVB_PRO" inside it
+  const childQlvbHandle = await rootHandle.getDirectoryHandle(QLVB_EXPORT_FOLDER, { create: true });
+  (childQlvbHandle as any).__displayPathPrefix = selectedFolderName
+    ? `${selectedFolderName}/${QLVB_EXPORT_FOLDER}`
+    : QLVB_EXPORT_PATH_LABEL;
+  return childQlvbHandle;
 }
 
 /**
- * Save a binary/base64/text file directly into Download/QLVB_PRO on Android APK and PC
+ * Save a binary/base64/text file directly into QLVB_PRO on Android APK and PC
  */
 export async function saveBase64ToQlvbFolder(
   base64Data: string,
@@ -253,68 +283,37 @@ export async function saveBase64ToQlvbFolder(
 
   const bytes = base64ToUint8Array(base64Data);
 
-  // 3. PC Browser File System Access API
+  // 3. PC Browser File System Access API (Directory Handle -> guarantees saving into QLVB_PRO)
   if (typeof window !== 'undefined' && window.self === window.top) {
-    // 3a. Use pre-acquired or saved directory handle if available
     try {
-      const qlvbDirHandle = preAcquiredDirHandle || (inMemoryRootHandle ? await ensurePcQlvbDirectoryHandle(false) : null);
+      const qlvbDirHandle =
+        preAcquiredDirHandle || (await ensurePcQlvbDirectoryHandle(false));
       if (qlvbDirHandle) {
         const fileHandle = await qlvbDirHandle.getFileHandle(cleanName, { create: true });
         const writable = await fileHandle.createWritable();
         await writable.write(bytes);
         await writable.close();
+        const folderPrefix =
+          (qlvbDirHandle as any).__displayPathPrefix ||
+          (await getLinkedPcExportFolderName()) ||
+          QLVB_EXPORT_FOLDER;
         return {
           savedViaNativeBridge: false,
           createdSubfolder: true,
-          targetPath: `${QLVB_EXPORT_PATH_LABEL}/${cleanName}`,
+          targetPath: `${folderPrefix}/${cleanName}`,
         };
       }
     } catch (err: any) {
       if (err?.name === 'AbortError' || err?.isUserCancelled) {
-        const cancelErr = new Error('Đã hủy thao tác lưu tệp.');
+        const cancelErr = new Error('Đã hủy chọn thư mục QLVB_PRO.');
         (cancelErr as any).isUserCancelled = true;
         throw cancelErr;
       }
-    }
-
-    // 3b. Use native OS File Picker (showSaveFilePicker) on PC Desktop (allows saving directly into QLVB_PRO)
-    if (typeof (window as any).showSaveFilePicker === 'function') {
-      try {
-        const ext = cleanName.endsWith('.json') ? '.json' : cleanName.endsWith('.csv') ? '.csv' : '.xlsx';
-        const fileHandle = await (window as any).showSaveFilePicker({
-          suggestedName: cleanName,
-          types: [
-            {
-              description: ext === '.xlsx' ? 'Bảng tính Excel (*.xlsx)' : 'Tệp dữ liệu (*' + ext + ')',
-              accept: {
-                [mimeType]: [ext],
-              },
-            },
-          ],
-        });
-        if (fileHandle) {
-          const writable = await fileHandle.createWritable();
-          await writable.write(bytes);
-          await writable.close();
-          const savedName = fileHandle.name || cleanName;
-          return {
-            savedViaNativeBridge: false,
-            createdSubfolder: true,
-            targetPath: `QLVB_PRO/${savedName}`,
-          };
-        }
-      } catch (err: any) {
-        if (err?.name === 'AbortError') {
-          const cancelErr = new Error('Đã hủy thao tác lưu tệp.');
-          (cancelErr as any).isUserCancelled = true;
-          throw cancelErr;
-        }
-        console.warn('showSaveFilePicker failed or was dismissed, falling back to download:', err);
-      }
+      console.warn('Directory picker error:', err);
     }
   }
 
-  // 4. Fallback for mobile browser PWA or legacy browsers without File System Access API
+  // 4. Fallback for mobile browser PWA or cross-origin iframe
   const blob = new Blob([bytes as unknown as BlobPart], { type: mimeType });
   triggerBrowserDownload(blob, cleanName);
 
@@ -323,7 +322,7 @@ export async function saveBase64ToQlvbFolder(
     savedViaNativeBridge: false,
     createdSubfolder: false,
     isIframeFallback: isIframe,
-    targetPath: isIframe ? `Downloads/${cleanName}` : `${QLVB_EXPORT_PATH_LABEL}/${cleanName}`,
+    targetPath: `Downloads/${cleanName}`,
   };
 }
 
