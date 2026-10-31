@@ -229,10 +229,143 @@ export const initAuth = (
   });
 };
 
-export const getPwaAuthPortalUrl = (): string => {
+export const GOOGLE_OAUTH_CLIENT_ID =
+  firebaseConfig.oAuthClientId ||
+  '450311768751-rmgrrlikq544ip78je075n1pkpvorggr.apps.googleusercontent.com';
+
+export const OAUTH_REDIRECT_ORIGIN =
+  'https://ais-pre-zi5n6oemfk3n5aykcoslbd-383593929664.asia-east1.run.app';
+
+export const getOAuthRedirectUri = (): string => {
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.run.app')) {
+    return `${window.location.origin}/__/auth/handler`;
+  }
+  return `${OAUTH_REDIRECT_ORIGIN}/__/auth/handler`;
+};
+
+export interface OAuthStatePayload {
+  pwaOrigin?: string;
+  apkAuth?: boolean;
+  returnTab?: string;
+  ts?: number;
+}
+
+export const buildDirectGoogleOAuthUrl = (options?: {
+  pwaOrigin?: string | null;
+  apkAuth?: boolean;
+  forceConsent?: boolean;
+}): string => {
+  const searchParams =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const pwaOrigin =
+    options?.pwaOrigin !== undefined
+      ? options.pwaOrigin
+      : searchParams?.get('pwa_origin') || null;
+  const apkAuth =
+    options?.apkAuth !== undefined
+      ? options.apkAuth
+      : searchParams?.get('apk_auth') === '1' && !pwaOrigin;
+
+  const stateObj: OAuthStatePayload = {
+    pwaOrigin: pwaOrigin || undefined,
+    apkAuth: apkAuth || undefined,
+    returnTab: 'sync',
+    ts: Date.now(),
+  };
+
+  const stateB64 =
+    typeof window !== 'undefined'
+      ? window.btoa(unescape(encodeURIComponent(JSON.stringify(stateObj))))
+      : '';
+
+  const params = new URLSearchParams({
+    client_id: GOOGLE_OAUTH_CLIENT_ID,
+    redirect_uri: getOAuthRedirectUri(),
+    response_type: 'token',
+    scope:
+      'openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/drive.file',
+    include_granted_scopes: 'true',
+    prompt: options?.forceConsent ? 'consent select_account' : 'select_account',
+    state: stateB64,
+  });
+
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+};
+
+export const consumeOAuthHashCallback = async (): Promise<{
+  user: User;
+  accessToken: string;
+  state: OAuthStatePayload;
+} | null> => {
+  if (typeof window === 'undefined') return null;
+  const rawHash = window.location.hash ? window.location.hash.substring(1) : '';
+  if (!rawHash.includes('access_token=')) return null;
+
+  const hashParams = new URLSearchParams(rawHash);
+  const accessToken = hashParams.get('access_token');
+  if (!accessToken) return null;
+
+  const expiresIn = parseInt(hashParams.get('expires_in') || '3500', 10) || 3500;
+  const stateRaw = hashParams.get('state') || '';
+  let state: OAuthStatePayload = {};
+  if (stateRaw) {
+    try {
+      state = JSON.parse(decodeURIComponent(escape(window.atob(stateRaw))));
+    } catch {
+      try {
+        state = JSON.parse(decodeURIComponent(stateRaw));
+      } catch {
+        // Ignore malformed state
+      }
+    }
+  }
+
+  let email = 'Đã kết nối Google Drive';
+  let displayName = 'Tài khoản Google Drive';
+  let photoURL: string | null = null;
+
+  // Synchronously lock sign-in state and persist token before async userinfo call
+  isSigningIn = true;
+  saveTokens(accessToken, null, { email, displayName, photoURL }, expiresIn);
+  window.history.replaceState({}, document.title, '/?tab=sync');
+
+  try {
+    const infoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (infoRes.ok) {
+      const info = await infoRes.json();
+      email = info.email || email;
+      displayName = info.name || email;
+      photoURL = info.picture || null;
+      saveTokens(accessToken, null, { email, displayName, photoURL }, expiresIn);
+    }
+  } catch {
+    // Fallback to default profile labels
+  } finally {
+    isSigningIn = false;
+  }
+
+  const syntheticUser = {
+    uid: email,
+    email,
+    displayName,
+    photoURL,
+  } as unknown as User;
+
+  const bridgeCode = generateApkAuthBridgeCode(accessToken, syntheticUser);
+  if (bridgeCode) {
+    broadcastAuthBridgeCode(bridgeCode);
+  }
+
+  return { user: syntheticUser, accessToken, state };
+};
+
+export const getPwaAuthPortalUrl = (autoOAuth = true): string => {
   if (typeof window === 'undefined') return WEB_AUTH_PORTAL_URL;
   const cleanOriginUrl = `${window.location.origin}${window.location.pathname}`;
-  return `${WEB_AUTH_PORTAL_URL}&pwa_origin=${encodeURIComponent(cleanOriginUrl)}`;
+  const autoParam = autoOAuth ? '&auto_oauth=1' : '';
+  return `${WEB_AUTH_PORTAL_URL}${autoParam}&pwa_origin=${encodeURIComponent(cleanOriginUrl)}`;
 };
 
 export const generatePwaReturnUrl = (
@@ -253,7 +386,9 @@ export const generatePwaReturnUrl = (
   }
 };
 
-const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: string }> => {
+const openOAuthPopupAndWait = (
+  targetUrl: string
+): Promise<{ user: User; accessToken: string }> => {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') {
       reject(new Error('Môi trường không hỗ trợ cửa sổ xác thực.'));
@@ -262,16 +397,19 @@ const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: st
 
     cancelPendingPortalPopup();
 
-    const portalUrl = getPwaAuthPortalUrl();
     const isStandalonePwa =
       window.matchMedia?.('(display-mode: standalone)').matches ||
       (window.navigator as any)?.standalone === true;
-    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+    const isMobileDevice =
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '') ||
+      window.matchMedia?.('(pointer:coarse)').matches;
+    const isTopLevelWindow = window.self === window.top;
 
-    // In standalone mobile PWA, same-tab redirect is faster and avoids trapped popups
-    if (isStandalonePwa && isMobileDevice) {
-      window.location.href = portalUrl;
-      reject(new Error('REDIRECTING_TO_PORTAL'));
+    // On mobile or standalone PWA top-level window, always use direct same-tab navigation
+    // to completely avoid popup blockers and Custom Tab popup traps
+    if (isTopLevelWindow && (isStandalonePwa || isMobileDevice)) {
+      window.location.assign(targetUrl);
+      reject(new Error('REDIRECTING_TO_GOOGLE'));
       return;
     }
 
@@ -281,15 +419,22 @@ const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: st
     const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
 
     const popup = window.open(
-      portalUrl,
+      targetUrl,
       'k02_pwa_google_auth',
       `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
     );
 
-    // If popup was blocked by browser, redirect in same tab immediately
     if (!popup) {
-      window.location.href = portalUrl;
-      reject(new Error('REDIRECTING_TO_PORTAL'));
+      if (isTopLevelWindow) {
+        window.location.assign(targetUrl);
+        reject(new Error('REDIRECTING_TO_GOOGLE'));
+        return;
+      }
+      reject(
+        new Error(
+          'Trình duyệt đã chặn cửa sổ bật lên (Popup). Vui lòng cho phép Popup hoặc mở ứng dụng ở tab riêng.'
+        )
+      );
       return;
     }
 
@@ -351,7 +496,11 @@ const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: st
     };
 
     const onMessage = (event: MessageEvent) => {
-      if (event.data && event.data.type === 'K02_AUTH_BRIDGE_CODE' && typeof event.data.code === 'string') {
+      if (
+        event.data &&
+        event.data.type === 'K02_AUTH_BRIDGE_CODE' &&
+        typeof event.data.code === 'string'
+      ) {
         handleBridgeCode(event.data.code);
       }
     };
@@ -372,7 +521,11 @@ const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: st
       try {
         bc = new BroadcastChannel(AUTH_BROADCAST_CHANNEL);
         bc.onmessage = (event) => {
-          if (event.data && event.data.type === 'K02_AUTH_BRIDGE_CODE' && typeof event.data.code === 'string') {
+          if (
+            event.data &&
+            event.data.type === 'K02_AUTH_BRIDGE_CODE' &&
+            typeof event.data.code === 'string'
+          ) {
             handleBridgeCode(event.data.code);
           }
         };
@@ -398,7 +551,6 @@ const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: st
       }
     };
 
-    // Timeout after 3 minutes if user abandons the popup
     const maxWaitTimer = setTimeout(() => {
       if (!settled && !checkLocalTokenSaved()) {
         settled = true;
@@ -409,125 +561,54 @@ const signInViaAuthorizedPortalPopup = (): Promise<{ user: User; accessToken: st
   });
 };
 
-export const googleSignIn = async (forceConsent = false): Promise<{ user: User; accessToken: string }> => {
+export const googleSignIn = async (
+  forceConsent = false
+): Promise<{ user: User; accessToken: string }> => {
   const isApkWebView = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
 
-  // If running inside Android APK native WebView, open external Chrome browser
-  // because Google blocks OAuth sign-ins inside embedded WebViews (disallowed_useragent)
+  // 1. Inside Android APK native WebView: open Chrome directly to portal with auto_oauth=1
   if (isApkWebView) {
     const bridge = (window as any).AndroidBridge;
     if (bridge && typeof bridge.openExternalBrowser === 'function') {
-      bridge.openExternalBrowser(WEB_AUTH_PORTAL_URL);
-      throw new Error('Đang mở trình duyệt Chrome để đăng nhập Google an toàn. Sau khi đăng nhập, ứng dụng sẽ tự động kết nối.');
+      bridge.openExternalBrowser(`${WEB_AUTH_PORTAL_URL}&auto_oauth=1`);
+      throw new Error(
+        'Đang mở trình duyệt Chrome để chọn tài khoản Google. Sau khi chọn xong, ứng dụng sẽ tự động kết nối.'
+      );
     }
   }
 
-  // Immediately open authorized portal on external PWA domains (e.g. GitHub Pages)
-  // so the browser popup blocker never blocks window.open due to async delay
+  // 2. On external PWA domains (e.g. GitHub Pages): use portal with auto_oauth=1
   if (!isAuthorizedFirebaseHost() && !isApkWebView) {
-    return await signInViaAuthorizedPortalPopup();
+    return await openOAuthPopupAndWait(getPwaAuthPortalUrl(true));
   }
 
-  const isMobile =
-    typeof window !== 'undefined' &&
-    (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '') ||
-      window.matchMedia?.('(pointer:coarse)').matches);
-
-  const searchParams =
-    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-  const isPortalMode = Boolean(searchParams && searchParams.get('apk_auth') === '1');
-
-  // On mobile devices or portal mode, redirect sign-in is 100% reliable and avoids popup-closed-by-user
-  if (isMobile && isPortalMode) {
-    await googleSignInRedirect();
-    throw new Error('REDIRECTING_TO_GOOGLE');
-  }
-
-  try {
-    authOperationId += 1;
-    isSigningIn = true;
-    const hasV2Scope = typeof window !== 'undefined' && localStorage.getItem(SCOPE_VERSION_KEY) === 'true';
-    if (forceConsent || !hasV2Scope) {
-      provider.setCustomParameters({ prompt: 'consent select_account' });
-    } else {
-      provider.setCustomParameters({ prompt: 'select_account' });
-    }
-
-    let result;
-    try {
-      result = await signInWithPopup(auth, provider);
-    } catch (popupErr: any) {
-      const code = popupErr?.code || '';
-      const msg = String(popupErr?.message || '');
-      if (
-        code === 'auth/popup-closed-by-user' ||
-        code === 'auth/popup-blocked' ||
-        code === 'auth/cancelled-popup-request' ||
-        msg.includes('popup-closed-by-user') ||
-        msg.includes('popup-blocked')
-      ) {
-        // Fallback to same-tab redirect sign in
-        await googleSignInRedirect();
-        throw new Error('REDIRECTING_TO_GOOGLE');
-      }
-      throw popupErr;
-    }
-
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Không thể lấy mã truy cập Google Drive từ xác thực.');
-    }
-
-    saveTokens(credential.accessToken, credential.idToken, {
-      email: result.user.email,
-      displayName: result.user.displayName,
-      photoURL: result.user.photoURL,
-    });
-    return { user: result.user, accessToken: credential.accessToken };
-  } catch (error: any) {
-    const isUnauthorizedDomain =
-      error?.code === 'auth/unauthorized-domain' ||
-      String(error?.message || '').includes('auth/unauthorized-domain');
-
-    if (isUnauthorizedDomain && !isApkWebView) {
-      return await signInViaAuthorizedPortalPopup();
-    }
-
-    console.error('Google Sign-in error:', error);
-    throw error;
-  } finally {
-    isSigningIn = false;
-  }
+  // 3. On authorized host (*.run.app): use direct first-party Google OAuth2 endpoint
+  // so mobile browsers (Cốc Cốc, Chrome, Safari) and PWAs never get blocked by 3rd-party cookies
+  const directOAuthUrl = buildDirectGoogleOAuthUrl({ forceConsent });
+  return await openOAuthPopupAndWait(directOAuthUrl);
 };
 
 /**
- * Direct same-window redirect sign-in (works in Android WebView on https://gen-lang-client-0383399711.firebaseapp.com without popups,
- * and falls back to the authorized portal redirect when running on external PWA domains like GitHub Pages)
+ * Direct same-window redirect sign-in (100% reliable on mobile PWAs, Cốc Cốc, Chrome, Safari)
  */
 export const googleSignInRedirect = async (): Promise<void> => {
-  const isApkWebView = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
-  if (!isAuthorizedFirebaseHost() && !isApkWebView && typeof window !== 'undefined') {
-    window.location.href = getPwaAuthPortalUrl();
+  if (typeof window === 'undefined') return;
+  const isApkWebView = Boolean((window as any).AndroidBridge);
+
+  if (isApkWebView) {
+    const bridge = (window as any).AndroidBridge;
+    if (bridge && typeof bridge.openExternalBrowser === 'function') {
+      bridge.openExternalBrowser(`${WEB_AUTH_PORTAL_URL}&auto_oauth=1`);
+      return;
+    }
+  }
+
+  if (!isAuthorizedFirebaseHost()) {
+    window.location.assign(getPwaAuthPortalUrl(true));
     return;
   }
 
-  try {
-    authOperationId += 1;
-    isSigningIn = true;
-    provider.setCustomParameters({ prompt: 'select_account' });
-    await signInWithRedirect(auth, provider);
-  } catch (error: any) {
-    isSigningIn = false;
-    const isUnauthorizedDomain =
-      error?.code === 'auth/unauthorized-domain' ||
-      String(error?.message || '').includes('auth/unauthorized-domain');
-
-    if (isUnauthorizedDomain && !isApkWebView && typeof window !== 'undefined') {
-      window.location.href = getPwaAuthPortalUrl();
-      return;
-    }
-    throw error;
-  }
+  window.location.assign(buildDirectGoogleOAuthUrl({ forceConsent: false }));
 };
 
 /**
@@ -939,8 +1020,8 @@ export async function uploadApkToDrive(
   }
 
   if (onStatusUpdate) onStatusUpdate('Đang tải tệp APK từ bộ nhớ ứng dụng...');
-  let apkRes = await fetch('./k02_mobile_qlvb_19.9.apk');
-  if (!apkRes.ok) apkRes = await fetch('./k02_mobile_qlvb_19.8.apk');
+  let apkRes = await fetch('./k02_mobile_qlvb_20.0.apk');
+  if (!apkRes.ok) apkRes = await fetch('./k02_mobile_qlvb_19.9.apk');
   if (!apkRes.ok) apkRes = await fetch('./k02_mobile_qlvb.apk');
   if (!apkRes.ok) {
     throw new Error('Không tìm thấy tệp APK nội bộ để tải lên.');
@@ -950,8 +1031,8 @@ export async function uploadApkToDrive(
   if (onStatusUpdate) onStatusUpdate(`Đang tải lên Google Drive (${(apkBlob.size / (1024 * 1024)).toFixed(1)} MB)...`);
 
   const metadata = {
-    name: 'k02_mobile_qlvb_19.9.apk',
-    description: 'Ứng dụng Quản lý văn bản K02 Mobile trên Android (v19.9)',
+    name: 'k02_mobile_qlvb_20.0.apk',
+    description: 'Ứng dụng Quản lý văn bản K02 Mobile trên Android (v20.0)',
     mimeType: 'application/vnd.android.package-archive',
   };
 

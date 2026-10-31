@@ -46,6 +46,8 @@ import {
 import {
   googleSignIn,
   googleSignInRedirect,
+  buildDirectGoogleOAuthUrl,
+  consumeOAuthHashCallback,
   connectWithExternalToken,
   generateApkAuthBridgeCode,
   generateApkDeepLink,
@@ -82,6 +84,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
   // Google Drive State
   const [user, setUser] = useState<User | null>(null);
   const [isDriveLoading, setIsDriveLoading] = useState(false);
+  const [isUploadingDrive, setIsUploadingDrive] = useState(false);
   const [driveStatus, setDriveStatus] = useState<string>('');
   const [recentBackups, setRecentBackups] = useState<DriveBackupFile[]>([]);
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
@@ -224,6 +227,42 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       }
     };
 
+    const consumeOAuthCallbackIfPresent = async () => {
+      const hashRes = await consumeOAuthHashCallback();
+      if (hashRes) {
+        setUser(hashRes.user);
+        setDriveStatus('✓ Đã xác thực Google Drive thành công!');
+        if (hashRes.state?.pwaOrigin) {
+          const returnUrl = generatePwaReturnUrl(
+            hashRes.state.pwaOrigin,
+            hashRes.accessToken,
+            hashRes.user
+          );
+          if (returnUrl) {
+            window.location.replace(returnUrl);
+            return true;
+          }
+        }
+        if (hashRes.state?.apkAuth) {
+          const deepLink = generateApkDeepLink(false, hashRes.accessToken, hashRes.user);
+          if (deepLink) {
+            window.location.href = deepLink;
+            return true;
+          }
+        }
+        const redirected = dispatchPortalAuthResult(hashRes.accessToken, hashRes.user);
+        if (!redirected) {
+          await fetchRecentBackups(hashRes.accessToken);
+        }
+        return true;
+      }
+      return false;
+    };
+
+    consumeOAuthCallbackIfPresent();
+    consumeNativeDeepLink();
+    consumeWebAuthCallbackUrl();
+
     const unsubscribe = initAuth(
       (currentUser, token) => {
         setUser(currentUser);
@@ -237,19 +276,32 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       () => {
         setUser(null);
         setRecentBackups([]);
-        // When landing on the Auth Portal (?apk_auth=1 or ?pwa_origin=...) without an active session,
-        // automatically attempt Google Sign-In once so the user doesn't have to click twice if popups are permitted
         const params = new URLSearchParams(window.location.search);
-        const isPortalMode = params.get('apk_auth') === '1' || Boolean(params.get('pwa_origin'));
-        if (isPortalMode && !hasAutoTriggeredPortalAuth.current) {
+        const isPortalMode =
+          params.get('apk_auth') === '1' ||
+          params.get('auto_oauth') === '1' ||
+          Boolean(params.get('pwa_origin'));
+        if (
+          isPortalMode &&
+          !hasAutoTriggeredPortalAuth.current &&
+          !(window.location.hash || '').includes('access_token=')
+        ) {
           hasAutoTriggeredPortalAuth.current = true;
-          handleConnectDrive(false, true);
+          // In top-level window on portal mode, immediately redirect to Google OAuth2 without intermediate click
+          if (window.self === window.top) {
+            setDriveStatus('Đang chuyển tới trang chọn tài khoản Google...');
+            window.location.replace(
+              buildDirectGoogleOAuthUrl({
+                pwaOrigin: params.get('pwa_origin'),
+                apkAuth: params.get('apk_auth') === '1' && !params.get('pwa_origin'),
+              })
+            );
+          } else {
+            handleConnectDrive(false, true);
+          }
         }
       }
     );
-
-    consumeNativeDeepLink();
-    consumeWebAuthCallbackUrl();
 
     const onApkAuthEvent = () => consumeNativeDeepLink();
     const onFocusOrVisible = () => {
@@ -349,7 +401,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
 
   const handleConnectDriveRedirect = async () => {
     setIsDriveLoading(true);
-    setDriveStatus('Đang chuyển hướng trực tiếp tới trang đăng nhập Google...');
+    setDriveStatus('Đang mở trang chọn tài khoản Google...');
     try {
       await googleSignInRedirect();
     } catch (err: any) {
@@ -423,17 +475,26 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     let token = await getAccessToken();
     if (!token) {
       try {
+        setIsDriveLoading(true);
         const res = await googleSignIn();
         setUser(res.user);
         token = res.accessToken;
       } catch (err: any) {
+        const msg = String(err?.message || '');
+        if (msg === 'REDIRECTING_TO_GOOGLE' || msg === 'REDIRECTING_TO_PORTAL') {
+          setDriveStatus('Đang chuyển tới trang chọn tài khoản Google...');
+          return;
+        }
         setUser(null);
-        setDriveStatus(`Đăng nhập bị hủy hoặc thất bại: ${err.message}`);
+        setDriveStatus(`Đăng nhập bị hủy hoặc thất bại: ${msg}`);
         return;
+      } finally {
+        setIsDriveLoading(false);
       }
     }
 
     setIsDriveLoading(true);
+    setIsUploadingDrive(true);
     setDriveStatus('Đang tạo tệp Excel từ cơ sở dữ liệu hiện tại...');
     try {
       const excelBlob = exportToExcelBlob(appState);
@@ -474,6 +535,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       });
     } finally {
       setIsDriveLoading(false);
+      setIsUploadingDrive(false);
     }
   };
 
@@ -1063,11 +1125,11 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
           <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2">
             <button
               onClick={handleUploadBackupToDrive}
-              disabled={isDriveLoading}
+              disabled={isDriveLoading || isUploadingDrive}
               className="flex-1 min-w-[220px] flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition active:scale-95 disabled:opacity-50"
             >
               <Upload className="w-4 h-4" />
-              <span>{isDriveLoading ? 'Đang sao lưu lên Drive...' : 'Sao lưu ngay lên Google Drive (Backup_QLVB_Pro)'}</span>
+              <span>{isUploadingDrive ? 'Đang sao lưu lên Drive...' : 'Sao lưu ngay lên Google Drive (Backup_QLVB_Pro)'}</span>
             </button>
 
             {user && (

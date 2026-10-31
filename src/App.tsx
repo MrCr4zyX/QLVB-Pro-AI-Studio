@@ -35,7 +35,16 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('apk_auth') === '1' || params.get('tab') === 'sync' || params.get('code')) {
+      const hash = window.location.hash || '';
+      if (
+        params.get('apk_auth') === '1' ||
+        params.get('auto_oauth') === '1' ||
+        params.get('pwa_origin') ||
+        params.get('tab') === 'sync' ||
+        params.get('code') ||
+        hash.includes('access_token=') ||
+        window.location.pathname.includes('/__/auth/handler')
+      ) {
         return 'sync';
       }
     }
@@ -109,7 +118,14 @@ export default function App() {
   // Show startup alert if overdue or urgent deadlines exist (matching PC 3.5.10 startup popup)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('apk_auth') === '1' || params.get('pwa_origin') || params.get('code')) {
+    if (
+      params.get('apk_auth') === '1' ||
+      params.get('auto_oauth') === '1' ||
+      params.get('pwa_origin') ||
+      params.get('code') ||
+      (window.location.hash || '').includes('access_token=') ||
+      window.location.pathname.includes('/__/auth/handler')
+    ) {
       return;
     }
     const hasSeenTodayAlert = sessionStorage.getItem('k02_startup_alert_shown');
