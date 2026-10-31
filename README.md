@@ -6,7 +6,9 @@
 
 This contains everything you need to run your app locally.
 
-View your app in AI Studio: https://ai.studio/apps/ecf1e42f-f864-4d05-8afe-cca4efc1dc78
+View your app in AI Studio: [https://ai.studio/apps/]
+
+(https://mrcr4zyx.github.io/QLVB-Pro-AI-Studio/)
 
 ## Run Locally
 
