@@ -166,10 +166,48 @@ async function verifyHandleReadWritePermission(handle: any): Promise<boolean> {
   }
 }
 
+function showFolderSuggestionBanner(): () => void {
+  if (typeof document === 'undefined') return () => {};
+  const bannerId = 'k02-folder-picker-hint-banner';
+  const existing = document.getElementById(bannerId);
+  if (existing) existing.remove();
+
+  // Copy "QLVB_PRO" to clipboard automatically so when user clicks "New folder" in Windows Explorer they can press Ctrl+V immediately
+  try {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(QLVB_EXPORT_FOLDER).catch(() => {});
+    }
+  } catch {
+    // Ignore clipboard error
+  }
+
+  const banner = document.createElement('div');
+  banner.id = bannerId;
+  banner.className =
+    'fixed top-4 left-1/2 -translate-x-1/2 z-[9999] max-w-md w-[92%] bg-slate-900/95 text-white border-2 border-emerald-400 rounded-2xl p-3.5 shadow-2xl pointer-events-none animate-bounce-in';
+  banner.innerHTML = `
+    <div class="flex items-start gap-2.5 text-xs">
+      <div class="w-6 h-6 rounded-full bg-emerald-500 text-slate-950 font-black flex items-center justify-center shrink-0 mt-0.5">📁</div>
+      <div class="space-y-1 leading-relaxed">
+        <div class="font-bold text-emerald-300 uppercase tracking-tight">Thiết lập thư mục lưu trữ lần đầu: QLVB_PRO</div>
+        <div class="text-slate-200">
+          Đã tự động chép sẵn tên <strong class="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-mono">QLVB_PRO</strong> vào bộ nhớ tạm.<br/>
+          👉 Trong cửa sổ Downloads vừa mở: Bấm <strong>New folder</strong> &rarr; nhấn <strong>Ctrl + V</strong> (dán tên <code>QLVB_PRO</code>) &rarr; bấm <strong>Select Folder</strong>.
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(banner);
+  return () => {
+    const el = document.getElementById(bannerId);
+    if (el) el.remove();
+  };
+}
+
 /**
  * Obtain or create the "QLVB_PRO" subfolder on PC.
  * - If user selects a parent folder (e.g. Documents / Desktop / D:\), automatically creates child folder "QLVB_PRO" inside it.
- * - If user is inside Downloads (which Chrome blocks selecting directly) and creates/selects a subfolder, it must be named "QLVB_PRO" (or a child "QLVB_PRO" will be created inside it).
+ * - If user is inside Downloads (which Chrome blocks selecting directly) and creates/selects a subfolder, it auto-copies "QLVB_PRO" to clipboard for 1-click naming.
  */
 export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise<any | null> {
   if (typeof window === 'undefined') return null;
@@ -199,11 +237,16 @@ export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise
   }
 
   if (!rootHandle) {
-    rootHandle = await showDirPicker({
-      id: 'k02_qlvb_pro_folder',
-      mode: 'readwrite',
-      startIn: 'downloads',
-    });
+    const removeBanner = showFolderSuggestionBanner();
+    try {
+      rootHandle = await showDirPicker({
+        id: 'k02_qlvb_pro_folder',
+        mode: 'readwrite',
+        startIn: 'downloads',
+      });
+    } finally {
+      removeBanner();
+    }
     if (rootHandle) {
       await saveRootDirectoryHandle(rootHandle);
     }

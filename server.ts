@@ -169,11 +169,11 @@ async function startServer() {
 </html>`);
   });
 
-  app.get('/k02_mobile_qlvb_20.0.apk', (req, res) => {
-    const apkPath = path.resolve(process.cwd(), 'public/k02_mobile_qlvb_20.0.apk');
+  app.get('/k02_mobile_qlvb_20.1.apk', (req, res) => {
+    const apkPath = path.resolve(process.cwd(), 'public/k02_mobile_qlvb_20.1.apk');
     if (fs.existsSync(apkPath)) {
       res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-      res.setHeader('Content-Disposition', 'attachment; filename="k02_mobile_qlvb_20.0.apk"');
+      res.setHeader('Content-Disposition', 'attachment; filename="k02_mobile_qlvb_20.1.apk"');
       fs.createReadStream(apkPath).pipe(res);
     } else {
       res.status(404).send('APK file not found');
@@ -184,7 +184,7 @@ async function startServer() {
     const apkPath = path.resolve(process.cwd(), 'public/k02_mobile_qlvb.apk');
     if (fs.existsSync(apkPath)) {
       res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-      res.setHeader('Content-Disposition', 'attachment; filename="k02_mobile_qlvb_20.0.apk"');
+      res.setHeader('Content-Disposition', 'attachment; filename="k02_mobile_qlvb_20.1.apk"');
       fs.createReadStream(apkPath).pipe(res);
     } else {
       res.status(404).send('APK file not found');

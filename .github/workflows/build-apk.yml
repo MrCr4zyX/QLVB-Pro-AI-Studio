@@ -94,8 +94,8 @@ jobs:
           fi
 
           if [ -f android/app/build.gradle ]; then
-            sed -i 's/versionCode [0-9]\+/versionCode 200/g' android/app/build.gradle
-            sed -i 's/versionName "[^"]*"/versionName "20.0"/g' android/app/build.gradle
+            sed -i 's/versionCode [0-9]\+/versionCode 201/g' android/app/build.gradle
+            sed -i 's/versionName "[^"]*"/versionName "20.1"/g' android/app/build.gradle
           fi
 
           # Dam bao AndroidManifest.xml co day du quyen thong bao Status Bar & luu file Download/QLVB_PRO
