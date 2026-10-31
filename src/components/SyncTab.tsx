@@ -24,7 +24,6 @@ import {
   KeyRound,
   Smartphone,
   Copy,
-  Globe,
 } from 'lucide-react';
 import {
   AppDataState,
@@ -1075,8 +1074,58 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
                   disabled={isDriveLoading}
                   className="w-full sm:w-auto justify-center flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 font-bold text-[11px] transition"
                 >
-                  <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span>Đăng nhập Tài khoản</span>
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                      <radialGradient id="ieBlueBody" cx="35%" cy="28%" r="70%">
+                        <stop offset="0%" stopColor="#8CE4FF" />
+                        <stop offset="35%" stopColor="#1B8CEB" />
+                        <stop offset="75%" stopColor="#0050A8" />
+                        <stop offset="100%" stopColor="#002359" />
+                      </radialGradient>
+                      <linearGradient id="ieGloss" x1="20" y1="8" x2="36" y2="32" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.65" />
+                        <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0" />
+                      </linearGradient>
+                      <linearGradient id="ieGoldOrbit" x1="6" y1="54" x2="58" y2="10" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stopColor="#D97706" />
+                        <stop offset="35%" stopColor="#FBBF24" />
+                        <stop offset="65%" stopColor="#FEF08A" />
+                        <stop offset="100%" stopColor="#D97706" />
+                      </linearGradient>
+                    </defs>
+                    {/* Back upper-left green/yellow glow of the orbit ring */}
+                    <path
+                      d="M12 37C17 24 31 12 45 9"
+                      stroke="#A3E635"
+                      strokeWidth="4.2"
+                      strokeLinecap="round"
+                      opacity="0.7"
+                    />
+                    {/* Classic thick 3D lowercase 'e' with upper eye cutout and bottom-right opening */}
+                    <path
+                      fillRule="evenodd"
+                      clipRule="evenodd"
+                      d="M33 8C18.64 8 8 18.75 8 32.5C8 46.25 18.64 56 33.2 56C43.5 56 51.8 50.8 55.6 42.5H42.2C39.9 45.6 36.8 47.2 33 47.2C25.4 47.2 20.2 42.3 19.6 35.2H56.5V30.8C56.5 17.5 46.6 8 33 8ZM20.2 26.8C21.2 20.4 26.2 16.2 32.8 16.2C39.4 16.2 44.3 20.4 45.1 26.8H20.2Z"
+                      fill="url(#ieBlueBody)"
+                      stroke="#001E4D"
+                      strokeWidth="1.2"
+                    />
+                    {/* Top 3D specular highlight on 'e' */}
+                    <path
+                      d="M15 23C18.5 14.5 25.5 10.5 33.5 10.5C41 10.5 47.5 14 51 21"
+                      stroke="url(#ieGloss)"
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
+                    />
+                    {/* Iconic diagonal golden swoosh ring orbiting from bottom-left to top-right */}
+                    <path
+                      d="M37 54.5C22.5 59.5 9.5 58.5 6.8 52.2C4.2 46.2 13.5 33.2 29.5 22.2C45.5 11.2 58.8 6.5 60.5 12.2C61.6 15.8 58.2 21.5 52 27.2"
+                      stroke="url(#ieGoldOrbit)"
+                      strokeWidth="4.2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span>Đăng nhập qua Trình duyệt</span>
                 </button>
 
                 <button
