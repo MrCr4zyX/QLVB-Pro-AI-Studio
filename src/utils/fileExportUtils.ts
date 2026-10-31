@@ -148,66 +148,238 @@ export function supportsDirectoryPicker(): boolean {
   );
 }
 
-async function verifyHandleReadWritePermission(handle: any): Promise<boolean> {
+/**
+ * Verify that a FileSystemDirectoryHandle not only has readwrite permission
+ * but also still physically exists on the user's disk (wasn't deleted or moved).
+ */
+async function verifyHandleExistsAndWritable(handle: any): Promise<boolean> {
   if (!handle) return false;
   try {
     const opts = { mode: 'readwrite' };
     if (typeof handle.queryPermission === 'function') {
       const current = await handle.queryPermission(opts);
-      if (current === 'granted') return true;
+      if (current !== 'granted') {
+        if (typeof handle.requestPermission === 'function') {
+          const requested = await handle.requestPermission(opts);
+          if (requested !== 'granted') return false;
+        } else {
+          return false;
+        }
+      }
     }
-    if (typeof handle.requestPermission === 'function') {
-      const requested = await handle.requestPermission(opts);
-      return requested === 'granted';
+
+    // Probe physical existence on disk:
+    // 1. If handle is QLVB_PRO itself, iterating 1 entry or probing a non-existent child throws NotFoundError if QLVB_PRO was deleted
+    const name = String(handle.name || '').trim().toUpperCase();
+    if (name === QLVB_EXPORT_FOLDER) {
+      if (typeof handle.values === 'function') {
+        const iterator = handle.values();
+        await iterator.next();
+      } else {
+        await handle.getFileHandle('__k02_probe__', { create: false }).catch((err: any) => {
+          if (err?.name === 'NotFoundError') return; // Parent directory exists, probe file doesn't -> OK
+          throw err;
+        });
+      }
+      return true;
     }
+
+    // 2. If handle is a parent folder, ensure child QLVB_PRO exists or create it now
+    await handle.getDirectoryHandle(QLVB_EXPORT_FOLDER, { create: true });
     return true;
   } catch {
     return false;
   }
 }
 
-function showFolderSuggestionBanner(): () => void {
-  if (typeof document === 'undefined') return () => {};
-  const bannerId = 'k02-folder-picker-hint-banner';
-  const existing = document.getElementById(bannerId);
-  if (existing) existing.remove();
+/**
+ * Check whether a valid, existing QLVB_PRO directory is currently linked on PC without opening a picker.
+ */
+export async function checkPcQlvbFolderReady(): Promise<{
+  isReady: boolean;
+  folderLabel: string | null;
+}> {
+  if (typeof window === 'undefined' || Boolean((window as any).AndroidBridge)) {
+    return { isReady: true, folderLabel: QLVB_EXPORT_PATH_LABEL };
+  }
+  const cached = inMemoryInitDone ? inMemoryRootHandle : await getSavedRootDirectoryHandle();
+  if (!cached) return { isReady: false, folderLabel: null };
 
-  // Copy "QLVB_PRO" to clipboard automatically so when user clicks "New folder" in Windows Explorer they can press Ctrl+V immediately
-  try {
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(QLVB_EXPORT_FOLDER).catch(() => {});
-    }
-  } catch {
-    // Ignore clipboard error
+  const cachedName = String(cached.name || '').trim();
+  if (/^new folder/i.test(cachedName)) {
+    await clearSavedPcExportDirectoryHandle();
+    return { isReady: false, folderLabel: null };
   }
 
-  const banner = document.createElement('div');
-  banner.id = bannerId;
-  banner.className =
-    'fixed top-4 left-1/2 -translate-x-1/2 z-[9999] max-w-md w-[92%] bg-slate-900/95 text-white border-2 border-emerald-400 rounded-2xl p-3.5 shadow-2xl pointer-events-none animate-bounce-in';
-  banner.innerHTML = `
-    <div class="flex items-start gap-2.5 text-xs">
-      <div class="w-6 h-6 rounded-full bg-emerald-500 text-slate-950 font-black flex items-center justify-center shrink-0 mt-0.5">📁</div>
-      <div class="space-y-1 leading-relaxed">
-        <div class="font-bold text-emerald-300 uppercase tracking-tight">Thiết lập thư mục lưu trữ lần đầu: QLVB_PRO</div>
-        <div class="text-slate-200">
-          Đã tự động chép sẵn tên <strong class="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-mono">QLVB_PRO</strong> vào bộ nhớ tạm.<br/>
-          👉 Trong cửa sổ Downloads vừa mở: Bấm <strong>New folder</strong> &rarr; nhấn <strong>Ctrl + V</strong> (dán tên <code>QLVB_PRO</code>) &rarr; bấm <strong>Select Folder</strong>.
-        </div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(banner);
-  return () => {
-    const el = document.getElementById(bannerId);
-    if (el) el.remove();
-  };
+  try {
+    const opts = { mode: 'readwrite' };
+    if (typeof cached.queryPermission === 'function') {
+      const perm = await cached.queryPermission(opts);
+      if (perm !== 'granted') return { isReady: false, folderLabel: null };
+    }
+    if (cachedName.toUpperCase() === QLVB_EXPORT_FOLDER) {
+      if (typeof cached.values === 'function') {
+        await cached.values().next();
+      }
+      return { isReady: true, folderLabel: QLVB_EXPORT_FOLDER };
+    }
+    await cached.getDirectoryHandle(QLVB_EXPORT_FOLDER, { create: true });
+    return { isReady: true, folderLabel: `${cachedName}/${QLVB_EXPORT_FOLDER}` };
+  } catch {
+    // Directory was deleted on disk or permission revoked
+    await clearSavedPcExportDirectoryHandle();
+    return { isReady: false, folderLabel: null };
+  }
 }
 
 /**
- * Obtain or create the "QLVB_PRO" subfolder on PC.
- * - If user selects a parent folder (e.g. Documents / Desktop / D:\), automatically creates child folder "QLVB_PRO" inside it.
- * - If user is inside Downloads (which Chrome blocks selecting directly) and creates/selects a subfolder, it auto-copies "QLVB_PRO" to clipboard for 1-click naming.
+ * Interactive Pre-Export Modal when QLVB_PRO directory is missing or not yet linked on PC.
+ * Gives the user a fresh click button so `showDirectoryPicker` always has valid transient user activation.
+ */
+function promptCreateMissingQlvbFolderModal(): Promise<any | null> {
+  return new Promise((resolve, reject) => {
+    if (typeof document === 'undefined') {
+      resolve(null);
+      return;
+    }
+
+    const modalId = 'k02-missing-qlvb-folder-modal';
+    const existing = document.getElementById(modalId);
+    if (existing) existing.remove();
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(QLVB_EXPORT_FOLDER).catch(() => {});
+      }
+    } catch {
+      // Ignore clipboard error
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = modalId;
+    overlay.className =
+      'fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-fadeIn';
+    overlay.innerHTML = `
+      <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl border-2 border-emerald-500 overflow-hidden text-slate-800">
+        <div class="bg-gradient-to-r from-emerald-700 to-teal-700 text-white px-4 py-3.5 flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <span class="text-lg">📁</span>
+            <div>
+              <h3 class="text-xs font-black uppercase tracking-wide">Phát hiện chưa có thư mục QLVB_PRO</h3>
+              <p class="text-[11px] text-emerald-100">Khởi tạo thư mục lưu trữ trước khi tải bản sao lưu</p>
+            </div>
+          </div>
+          <button type="button" id="k02-folder-modal-close" class="w-7 h-7 rounded-full bg-white/15 hover:bg-white/25 text-white text-xs font-bold flex items-center justify-center">✕</button>
+        </div>
+
+        <div class="p-4 space-y-3 text-xs leading-relaxed">
+          <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-1.5">
+            <div class="font-bold text-emerald-900">Đã tự động chép sẵn tên thư mục: <code class="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-mono font-bold">QLVB_PRO</code></div>
+            <ol class="list-decimal list-inside space-y-1 text-[11px] text-slate-700">
+              <li>Bấm nút <strong>"Tạo & Chọn thư mục QLVB_PRO"</strong> bên dưới.</li>
+              <li>Trong cửa sổ <strong>Downloads</strong> hiện ra: Bấm <strong>New folder</strong> &rarr; Nhấn <strong>Ctrl + V</strong> (để dán tên <code>QLVB_PRO</code>) &rarr; Nhấn <strong>Enter</strong>.</li>
+              <li>Bấm <strong>Select Folder (Chọn thư mục)</strong> để lưu ngay bản sao lưu vào <code>QLVB_PRO</code>.</li>
+            </ol>
+          </div>
+
+          <div id="k02-folder-modal-err" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold"></div>
+
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-1">
+            <button type="button" id="k02-folder-modal-cancel" class="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition">
+              Hủy bỏ
+            </button>
+            <button type="button" id="k02-folder-modal-pick" class="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition active:scale-95">
+              📁 Tạo & Chọn thư mục QLVB_PRO
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const cleanup = () => {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+
+    const closeBtn = overlay.querySelector('#k02-folder-modal-close');
+    const cancelBtn = overlay.querySelector('#k02-folder-modal-cancel');
+    const pickBtn = overlay.querySelector('#k02-folder-modal-pick');
+    const errBox = overlay.querySelector('#k02-folder-modal-err') as HTMLElement | null;
+
+    const handleCancel = () => {
+      cleanup();
+      const cancelErr = new Error('Đã hủy tạo thư mục QLVB_PRO.');
+      (cancelErr as any).isUserCancelled = true;
+      reject(cancelErr);
+    };
+
+    closeBtn?.addEventListener('click', handleCancel);
+    cancelBtn?.addEventListener('click', handleCancel);
+
+    pickBtn?.addEventListener('click', async () => {
+      try {
+        if (navigator?.clipboard?.writeText) {
+          navigator.clipboard.writeText(QLVB_EXPORT_FOLDER).catch(() => {});
+        }
+        const showDirPicker = (window as any).showDirectoryPicker;
+        const pickedHandle = await showDirPicker({
+          id: 'k02_qlvb_pro_folder',
+          mode: 'readwrite',
+          startIn: 'downloads',
+        });
+        if (!pickedHandle) return;
+
+        const pickedName = String(pickedHandle.name || '').trim();
+        if (/^new folder/i.test(pickedName)) {
+          // User clicked New folder in Downloads but forgot to rename it to QLVB_PRO -> create QLVB_PRO inside or prompt
+          if (errBox) {
+            errBox.textContent =
+              '⚠️ Bạn vừa chọn "New folder" chưa đổi tên. Vui lòng đổi tên thư mục thành "QLVB_PRO" (nhấn Ctrl + V) rồi bấm Select Folder!';
+            errBox.classList.remove('hidden');
+          }
+          return;
+        }
+
+        await saveRootDirectoryHandle(pickedHandle);
+        cleanup();
+
+        if (pickedName.toUpperCase() === QLVB_EXPORT_FOLDER) {
+          (pickedHandle as any).__displayPathPrefix = QLVB_EXPORT_FOLDER;
+          resolve(pickedHandle);
+          return;
+        }
+
+        const childQlvbHandle = await pickedHandle.getDirectoryHandle(QLVB_EXPORT_FOLDER, {
+          create: true,
+        });
+        (childQlvbHandle as any).__displayPathPrefix = pickedName
+          ? `${pickedName}/${QLVB_EXPORT_FOLDER}`
+          : QLVB_EXPORT_PATH_LABEL;
+        resolve(childQlvbHandle);
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          if (errBox) {
+            errBox.textContent =
+              'Bạn vừa đóng cửa sổ chọn thư mục. Hãy bấm lại "📁 Tạo & Chọn thư mục QLVB_PRO" để chọn thư mục trước khi sao lưu.';
+            errBox.classList.remove('hidden');
+          }
+          return;
+        }
+        if (errBox) {
+          errBox.textContent =
+            'Trình duyệt không cho phép chọn thẳng gốc Downloads. Hãy bấm "New folder" bên trong Downloads, nhấn Ctrl + V để đặt tên "QLVB_PRO", rồi chọn thư mục đó!';
+          errBox.classList.remove('hidden');
+        }
+      }
+    });
+  });
+}
+
+/**
+ * Obtain or create the "QLVB_PRO" subfolder on PC before downloading/saving backup.
+ * - Detects if QLVB_PRO is missing or deleted on disk.
+ * - If missing, prompts the user to create/select QLVB_PRO before proceeding with the backup.
  */
 export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise<any | null> {
   if (typeof window === 'undefined') return null;
@@ -223,36 +395,24 @@ export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise
   let rootHandle: any = null;
 
   if (!forcePickNew) {
-    // Use in-memory handle first to avoid IndexedDB async delay consuming user activation
     const cached = inMemoryInitDone ? inMemoryRootHandle : await getSavedRootDirectoryHandle();
     if (cached) {
       const cachedName = String(cached.name || '').trim();
-      // Reject accidentally cached "New folder" from earlier tests so user isn't stuck with it
       if (/^new folder/i.test(cachedName)) {
         await clearSavedPcExportDirectoryHandle();
-      } else if (await verifyHandleReadWritePermission(cached)) {
+      } else if (await verifyHandleExistsAndWritable(cached)) {
         rootHandle = cached;
+      } else {
+        // Handle was deleted on disk or permission lost -> clear cache so we recreate QLVB_PRO
+        await clearSavedPcExportDirectoryHandle();
       }
     }
   }
 
   if (!rootHandle) {
-    const removeBanner = showFolderSuggestionBanner();
-    try {
-      rootHandle = await showDirPicker({
-        id: 'k02_qlvb_pro_folder',
-        mode: 'readwrite',
-        startIn: 'downloads',
-      });
-    } finally {
-      removeBanner();
-    }
-    if (rootHandle) {
-      await saveRootDirectoryHandle(rootHandle);
-    }
+    // Missing QLVB_PRO directory -> open interactive pre-export modal to create/select QLVB_PRO first
+    return await promptCreateMissingQlvbFolderModal();
   }
-
-  if (!rootHandle) return null;
 
   const selectedFolderName = String(rootHandle.name || '').trim();
   // 1. User directly selected a folder named "QLVB_PRO" (e.g. Downloads/QLVB_PRO) -> save directly inside it
@@ -261,7 +421,7 @@ export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise
     return rootHandle;
   }
 
-  // 2. User selected another folder (e.g. Documents, Desktop, D:\, or New folder) -> automatically create "QLVB_PRO" inside it
+  // 2. User selected another parent folder -> automatically create "QLVB_PRO" inside it
   const childQlvbHandle = await rootHandle.getDirectoryHandle(QLVB_EXPORT_FOLDER, { create: true });
   (childQlvbHandle as any).__displayPathPrefix = selectedFolderName
     ? `${selectedFolderName}/${QLVB_EXPORT_FOLDER}`
@@ -326,33 +486,28 @@ export async function saveBase64ToQlvbFolder(
 
   const bytes = base64ToUint8Array(base64Data);
 
-  // 3. PC Browser File System Access API (Directory Handle -> guarantees saving into QLVB_PRO)
-  if (typeof window !== 'undefined' && window.self === window.top) {
-    try {
-      const qlvbDirHandle =
-        preAcquiredDirHandle || (await ensurePcQlvbDirectoryHandle(false));
-      if (qlvbDirHandle) {
-        const fileHandle = await qlvbDirHandle.getFileHandle(cleanName, { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(bytes);
-        await writable.close();
-        const folderPrefix =
-          (qlvbDirHandle as any).__displayPathPrefix ||
-          (await getLinkedPcExportFolderName()) ||
-          QLVB_EXPORT_FOLDER;
-        return {
-          savedViaNativeBridge: false,
-          createdSubfolder: true,
-          targetPath: `${folderPrefix}/${cleanName}`,
-        };
-      }
-    } catch (err: any) {
-      if (err?.name === 'AbortError' || err?.isUserCancelled) {
-        const cancelErr = new Error('Đã hủy chọn thư mục QLVB_PRO.');
-        (cancelErr as any).isUserCancelled = true;
-        throw cancelErr;
-      }
-      console.warn('Directory picker error:', err);
+  // 3. PC Browser File System Access API (Detects missing QLVB_PRO -> prompts creation before saving)
+  if (
+    typeof window !== 'undefined' &&
+    window.self === window.top &&
+    typeof (window as any).showDirectoryPicker === 'function'
+  ) {
+    const qlvbDirHandle =
+      preAcquiredDirHandle || (await ensurePcQlvbDirectoryHandle(false));
+    if (qlvbDirHandle) {
+      const fileHandle = await qlvbDirHandle.getFileHandle(cleanName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(bytes);
+      await writable.close();
+      const folderPrefix =
+        (qlvbDirHandle as any).__displayPathPrefix ||
+        (await getLinkedPcExportFolderName()) ||
+        QLVB_EXPORT_FOLDER;
+      return {
+        savedViaNativeBridge: false,
+        createdSubfolder: true,
+        targetPath: `${folderPrefix}/${cleanName}`,
+      };
     }
   }
 

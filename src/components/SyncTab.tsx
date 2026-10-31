@@ -37,6 +37,7 @@ import { generateInitialData } from '../services/storageService';
 import { playSuccessChime, playAlertChime, notifyAndroidNative } from '../utils/soundUtils';
 import { markWeeklyBackupCompleted } from '../hooks/useNotifications';
 import {
+  checkPcQlvbFolderReady,
   ensurePcQlvbDirectoryHandle,
   getExportTimestampPrefix,
   QLVB_EXPORT_PATH_LABEL,
@@ -99,6 +100,16 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenInputStr, setTokenInputStr] = useState('');
   const [copiedBridgeCode, setCopiedBridgeCode] = useState(false);
+  const [qlvbFolderReady, setQlvbFolderReady] = useState<boolean>(true);
+
+  const refreshQlvbFolderStatus = async () => {
+    const res = await checkPcQlvbFolderReady();
+    setQlvbFolderReady(res.isReady);
+  };
+
+  useEffect(() => {
+    refreshQlvbFolderStatus();
+  }, []);
   const hasAutoTriggeredPortalAuth = useRef(false);
   const isApkMode = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
   const searchParams =
@@ -710,6 +721,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       const timestamp = getExportTimestampPrefix();
       const filename = `${timestamp}_documents.xlsx`;
       const { count, exportResult } = await exportToExcel(appState, filename, preDirHandle);
+      await refreshQlvbFolderStatus();
       const targetPath = exportResult.targetPath || `${QLVB_EXPORT_PATH_LABEL}/${filename}`;
       markWeeklyBackupCompleted();
       playSuccessChime();
@@ -753,6 +765,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         'application/json',
         preDirHandle
       );
+      await refreshQlvbFolderStatus();
       markWeeklyBackupCompleted();
 
       playSuccessChime();
@@ -1429,11 +1442,12 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
                     onClick={async () => {
                       try {
                         const dir = await ensurePcQlvbDirectoryHandle(true);
+                        await refreshQlvbFolderStatus();
                         if (dir) {
                           const folderLabel = (dir as any).__displayPathPrefix || 'QLVB_PRO';
                           setImportStatus({
                             type: 'success',
-                            message: `✓ Đã liên kết thư mục lưu trữ: ${folderLabel}\nMọi tệp sao lưu Excel/JSON sẽ tự động lưu vào thư mục QLVB_PRO này.`,
+                            message: `✓ Đã khởi tạo & liên kết thư mục lưu trữ: ${folderLabel}\nMọi tệp sao lưu Excel/JSON sẽ tự động lưu vào thư mục QLVB_PRO này.`,
                           });
                         }
                       } catch (err: any) {
@@ -1444,9 +1458,17 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
                         });
                       }
                     }}
-                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-bold transition active:scale-95"
+                    className={`w-full sm:w-auto flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border text-xs font-bold transition active:scale-95 ${
+                      qlvbFolderReady
+                        ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-400 animate-pulse'
+                    }`}
                   >
-                    <span>📁 Chọn thư mục QLVB_PRO</span>
+                    <span>
+                      {qlvbFolderReady
+                        ? '📁 Đã có thư mục QLVB_PRO (Đổi)'
+                        : '⚠️ Thiếu thư mục QLVB_PRO (Bấm tạo trước khi sao lưu)'}
+                    </span>
                   </button>
                 )}
             </div>

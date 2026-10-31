@@ -19,6 +19,7 @@ import { EnrichedDocument, DocumentType, WorkField } from '../types';
 import { displayDate, formatDocCode } from '../utils/dateUtils';
 import { playSuccessChime, playAlertChime, notifyAndroidNative } from '../utils/soundUtils';
 import {
+  checkPcQlvbFolderReady,
   ensurePcQlvbDirectoryHandle,
   getExportTimestampPrefix,
   saveWorkbookToQlvbFolder,
@@ -44,6 +45,16 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+  const [qlvbFolderReady, setQlvbFolderReady] = useState<boolean>(true);
+
+  const refreshQlvbFolderStatus = async () => {
+    const res = await checkPcQlvbFolderReady();
+    setQlvbFolderReady(res.isReady);
+  };
+
+  useEffect(() => {
+    refreshQlvbFolderStatus();
+  }, []);
 
   useEffect(() => {
     if (!exportNotice) return;
@@ -156,6 +167,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
         filename,
         preDirHandle
       );
+      await refreshQlvbFolderStatus();
 
       playSuccessChime();
       notifyAndroidNative(
@@ -255,11 +267,12 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                 onClick={async () => {
                   try {
                     const dir = await ensurePcQlvbDirectoryHandle(true);
+                    await refreshQlvbFolderStatus();
                     if (dir) {
                       const folderLabel = (dir as any).__displayPathPrefix || 'QLVB_PRO';
                       setExportNotice({
                         type: 'success',
-                        message: `✓ Đã liên kết thư mục lưu trữ: ${folderLabel}\nTừ nay mọi file xuất sẽ tự động lưu vào thư mục QLVB_PRO này.`,
+                        message: `✓ Đã khởi tạo & liên kết thư mục lưu trữ: ${folderLabel}\nTừ nay mọi file xuất sẽ tự động lưu vào thư mục QLVB_PRO này.`,
                       });
                     }
                   } catch (err: any) {
@@ -270,10 +283,14 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                     });
                   }
                 }}
-                className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-[11px] font-semibold px-2.5 py-2 rounded-xl transition active:scale-95"
-                title="Đổi hoặc chọn lại thư mục QLVB_PRO trên máy tính"
+                className={`flex items-center gap-1 border text-[11px] font-semibold px-2.5 py-2 rounded-xl transition active:scale-95 ${
+                  qlvbFolderReady
+                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-400 animate-pulse'
+                }`}
+                title="Kiểm tra hoặc tạo thư mục QLVB_PRO trước khi sao lưu"
               >
-                <span>📁 Thư mục QLVB_PRO</span>
+                <span>{qlvbFolderReady ? '📁 Đã có QLVB_PRO' : '⚠️ Chưa có QLVB_PRO (Tạo ngay)'}</span>
               </button>
             )}
           <button
