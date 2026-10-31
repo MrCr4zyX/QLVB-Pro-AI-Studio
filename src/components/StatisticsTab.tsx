@@ -19,6 +19,7 @@ import { EnrichedDocument, DocumentType, WorkField } from '../types';
 import { displayDate, formatDocCode } from '../utils/dateUtils';
 import { playSuccessChime, playAlertChime, notifyAndroidNative } from '../utils/soundUtils';
 import {
+  ensurePcQlvbDirectoryHandle,
   getExportTimestampPrefix,
   saveWorkbookToQlvbFolder,
 } from '../utils/fileExportUtils';
@@ -96,6 +97,13 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   // Export summary Excel (supports both Android APK native bridge and PC/Web QLVB_PRO subfolder creation)
   const exportStatisticsExcel = async () => {
     try {
+      let preDirHandle: any = null;
+      try {
+        preDirHandle = await ensurePcQlvbDirectoryHandle(false);
+      } catch (dirErr: any) {
+        if (dirErr?.name === 'AbortError' || dirErr?.isUserCancelled) return;
+      }
+
       const wb = XLSX.utils.book_new();
 
       // Summary sheet
@@ -143,7 +151,11 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
 
       const timestamp = getExportTimestampPrefix();
       const filename = `${timestamp}_ThongKeVanBan.xlsx`;
-      const { targetPath, isIframeFallback } = await saveWorkbookToQlvbFolder(wb, filename);
+      const { targetPath, createdSubfolder, isIframeFallback } = await saveWorkbookToQlvbFolder(
+        wb,
+        filename,
+        preDirHandle
+      );
 
       playSuccessChime();
       notifyAndroidNative(
@@ -153,8 +165,10 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
       setExportNotice({
         type: 'success',
         message: isIframeFallback
-          ? `✓ Đã tải tệp "${filename}".\n(Mở ứng dụng ở tab trình duyệt PC riêng để tự động tạo thư mục con Download/QLVB_PRO)`
-          : `✓ Đã xuất tệp thống kê thành công (${documents.length} văn bản)!\n📁 Vị trí: ${targetPath}`,
+          ? `✓ Đã tải tệp "${filename}" vào Downloads.\n(Lưu ý: Bạn đang dùng khung xem trước AI Studio. Hãy mở ứng dụng ở tab trình duyệt PC riêng để tự động tạo thư mục con Download/QLVB_PRO)`
+          : createdSubfolder
+          ? `✓ Đã xuất tệp thống kê thành công (${documents.length} văn bản)!\n📁 Đã tạo & lưu tại: ${targetPath}`
+          : `✓ Đã tải tệp thống kê "${filename}" (${documents.length} văn bản) về thư mục Download của trình duyệt.`,
       });
     } catch (err: any) {
       if (err?.isUserCancelled) return;

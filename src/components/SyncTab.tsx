@@ -720,8 +720,10 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       setImportStatus({
         type: 'success',
         message: exportResult.isIframeFallback
-          ? `✓ Đã tải xuống "${filename}" (${count} văn bản).\n(Mở ứng dụng ở tab trình duyệt PC riêng để tự động tạo thư mục con Download/QLVB_PRO)`
-          : `✓ Đã xuất thành công ${count} văn bản!\n📁 Vị trí: ${targetPath}`,
+          ? `✓ Đã tải xuống "${filename}" (${count} văn bản).\n(Lưu ý: Bạn đang dùng khung xem trước AI Studio. Hãy mở ứng dụng ở tab trình duyệt PC riêng để tự động tạo thư mục con Download/QLVB_PRO)`
+          : exportResult.createdSubfolder
+          ? `✓ Đã xuất thành công ${count} văn bản!\n📁 Đã tạo & lưu tại: ${targetPath}`
+          : `✓ Đã tải xuống "${filename}" (${count} văn bản) vào thư mục Download của trình duyệt.`,
       });
     } catch (error: any) {
       if (error?.isUserCancelled) return;
@@ -745,7 +747,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       const jsonStr = JSON.stringify(appState, null, 2);
       const timestamp = getExportTimestampPrefix();
       const filename = `${timestamp}_k02_backup.json`;
-      const { targetPath, isIframeFallback } = await saveTextToQlvbFolder(
+      const { targetPath, createdSubfolder, isIframeFallback } = await saveTextToQlvbFolder(
         jsonStr,
         filename,
         'application/json',
@@ -761,8 +763,10 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       setImportStatus({
         type: 'success',
         message: isIframeFallback
-          ? `✓ Đã tải file sao lưu "${filename}".\n(Mở ứng dụng ở tab trình duyệt PC riêng để tự động tạo thư mục con Download/QLVB_PRO)`
-          : `✓ Đã xuất file sao lưu JSON thành công!\n📁 Vị trí: ${targetPath}`,
+          ? `✓ Đã tải file sao lưu "${filename}".\n(Lưu ý: Bạn đang dùng khung xem trước AI Studio. Hãy mở ứng dụng ở tab trình duyệt PC riêng để tự động tạo thư mục con Download/QLVB_PRO)`
+          : createdSubfolder
+          ? `✓ Đã xuất file sao lưu JSON thành công!\n📁 Đã tạo & lưu tại: ${targetPath}`
+          : `✓ Đã tải file sao lưu "${filename}" vào thư mục Download của trình duyệt.`,
       });
     } catch (error: any) {
       if (error?.isUserCancelled) return;

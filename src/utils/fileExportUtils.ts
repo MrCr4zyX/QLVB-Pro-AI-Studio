@@ -54,6 +54,9 @@ function base64ToUint8Array(base64Data: string): Uint8Array {
   return bytes;
 }
 
+let inMemoryRootHandle: any | null = null;
+let inMemoryInitDone = false;
+
 /**
  * IndexedDB storage for PC FileSystemDirectoryHandle so user only selects Downloads once
  */
@@ -76,20 +79,26 @@ function openFsHandleDb(): Promise<IDBDatabase> {
 }
 
 async function getSavedRootDirectoryHandle(): Promise<any | null> {
+  if (inMemoryRootHandle) return inMemoryRootHandle;
   try {
     const db = await openFsHandleDb();
-    return await new Promise((resolve) => {
+    const res = await new Promise<any | null>((resolve) => {
       const tx = db.transaction(FS_STORE_NAME, 'readonly');
       const req = tx.objectStore(FS_STORE_NAME).get(FS_HANDLE_KEY);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
     });
+    if (res) inMemoryRootHandle = res;
+    return res;
   } catch {
     return null;
+  } finally {
+    inMemoryInitDone = true;
   }
 }
 
 async function saveRootDirectoryHandle(handle: any): Promise<void> {
+  inMemoryRootHandle = handle;
   try {
     const db = await openFsHandleDb();
     await new Promise<void>((resolve) => {
@@ -101,6 +110,27 @@ async function saveRootDirectoryHandle(handle: any): Promise<void> {
   } catch {
     // Ignore IDB storage errors
   }
+}
+
+// Preload cached handle into memory on module load so click handlers don't lose transient user activation awaiting IDB
+if (typeof window !== 'undefined') {
+  getSavedRootDirectoryHandle().catch(() => {});
+}
+
+export async function getLinkedPcExportFolderName(): Promise<string | null> {
+  const handle = inMemoryRootHandle || (await getSavedRootDirectoryHandle());
+  if (!handle) return null;
+  const name = String(handle.name || 'Downloads');
+  return name.toUpperCase() === QLVB_EXPORT_FOLDER ? name : `${name}/${QLVB_EXPORT_FOLDER}`;
+}
+
+export function supportsDirectoryPicker(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    !Boolean((window as any).AndroidBridge) &&
+    typeof (window as any).showDirectoryPicker === 'function' &&
+    window.self === window.top
+  );
 }
 
 async function verifyHandleReadWritePermission(handle: any): Promise<boolean> {
@@ -123,12 +153,15 @@ async function verifyHandleReadWritePermission(handle: any): Promise<boolean> {
 
 /**
  * Obtain or create the "QLVB_PRO" subfolder inside the user's chosen Downloads directory on PC.
- * Call this at the start of a user click handler so transient user activation is preserved.
+ * Call this synchronously at the very start of a user click handler so transient user activation is preserved.
  */
 export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise<any | null> {
   if (typeof window === 'undefined') return null;
   const isApk = Boolean((window as any).AndroidBridge);
   if (isApk) return null;
+
+  // Cross-origin iframes (like AI Studio preview pane) block showDirectoryPicker with SecurityError
+  if (window.self !== window.top) return null;
 
   const showDirPicker = (window as any).showDirectoryPicker;
   if (typeof showDirPicker !== 'function') return null;
@@ -136,7 +169,8 @@ export async function ensurePcQlvbDirectoryHandle(forcePickNew = false): Promise
   let rootHandle: any = null;
 
   if (!forcePickNew) {
-    const cached = await getSavedRootDirectoryHandle();
+    // Use in-memory handle first to avoid IndexedDB async delay consuming user activation
+    const cached = inMemoryInitDone ? inMemoryRootHandle : await getSavedRootDirectoryHandle();
     if (cached && (await verifyHandleReadWritePermission(cached))) {
       rootHandle = cached;
     }
@@ -244,7 +278,7 @@ export async function saveBase64ToQlvbFolder(
     }
   }
 
-  // 4. Fallback for cross-origin iframe or legacy browsers without File System Access API
+  // 4. Fallback for cross-origin iframe or mobile browsers without File System Access API
   const blob = new Blob([bytes as unknown as BlobPart], { type: mimeType });
   triggerBrowserDownload(blob, cleanName);
 
@@ -253,7 +287,7 @@ export async function saveBase64ToQlvbFolder(
     savedViaNativeBridge: false,
     createdSubfolder: false,
     isIframeFallback: isIframe,
-    targetPath: `${QLVB_EXPORT_PATH_LABEL}/${cleanName}`,
+    targetPath: isIframe ? `Downloads/${cleanName}` : `${QLVB_EXPORT_PATH_LABEL}/${cleanName}`,
   };
 }
 
