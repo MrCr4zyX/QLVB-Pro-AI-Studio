@@ -1,5 +1,5 @@
 import { FullTextPopover } from './FullTextPopover';
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   BarChart3,
   Download,
@@ -12,11 +12,12 @@ import {
   Layers,
   Building,
   Calendar,
+  Search,
   X,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { EnrichedDocument, DocumentType, WorkField } from '../types';
-import { displayDate, formatDocCode } from '../utils/dateUtils';
+import { displayDate, formatDocCode, searchKey } from '../utils/dateUtils';
 import { playSuccessChime, playAlertChime, notifyAndroidNative } from '../utils/soundUtils';
 import {
   checkPcQlvbFolderReady,
@@ -41,6 +42,9 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   const [activeStatus, setActiveStatus] = useState<string>('Tất cả');
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedField, setSelectedField] = useState<string | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [exportNotice, setExportNotice] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -204,16 +208,37 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     return index < 0 ? typePriority.length - 2 : index;
   };
 
+  useEffect(() => {
+    if (isSearchOpen) {
+      requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+      });
+    }
+  }, [isSearchOpen]);
+
+  const handleCloseSearch = () => {
+    setSearchTerm('');
+    setIsSearchOpen(false);
+  };
+
   const filteredByStatus = useMemo(() => {
+    const key = searchKey(searchTerm);
     return documents
       .filter((d) => activeStatus === 'Tất cả' || d.effect_status === activeStatus)
       .filter((d) => !selectedType || (d.typeName || 'Chưa phân loại') === selectedType)
       .filter((d) => !selectedField || (d.fieldNames?.length ? d.fieldNames.includes(selectedField) : selectedField === 'Chưa phân loại'))
+      .filter((d) => {
+        if (!key) return true;
+        const haystack = searchKey(
+          `${formatDocCode(d.number, d.symbol)} ${d.number} ${d.symbol} ${d.agency} ${d.summary} ${d.notes} ${d.amendment_text} ${d.typeName} ${(d.fieldNames || []).join(' ')} ${displayDate(d.issued)}`
+        );
+        return haystack.includes(key);
+      })
       .slice()
       .sort((a, b) => getTypePriority(a.typeName) - getTypePriority(b.typeName) ||
         (a.typeName || '').localeCompare(b.typeName || '', 'vi') ||
         (a.number || '').localeCompare(b.number || '', 'vi', { numeric: true }));
-  }, [documents, activeStatus, selectedType, selectedField]);
+  }, [documents, activeStatus, selectedType, selectedField, searchTerm]);
 
   return (
     <div className="pb-24 pt-4 px-4 sm:px-6 max-w-6xl mx-auto space-y-4 flex flex-col min-h-[calc(100vh-100px)]">
@@ -395,12 +420,48 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
       </div>
 
       {/* Selected Status Document List */}
-      <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-xs space-y-2.5 flex-1 flex flex-col min-h-[350px]">
-        <div className="flex items-center justify-between text-xs">
+      <div className="relative bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-xs space-y-2.5 flex-1 flex flex-col min-h-[350px]">
+        <div className="relative flex items-center justify-between gap-2 text-xs min-h-[28px]">
           <h3 className="font-bold text-slate-800 uppercase">
             Danh sách ({[activeStatus !== 'Tất cả' ? activeStatus : null, selectedType, selectedField].filter(Boolean).join(' · ') || 'Tất cả'}): {filteredByStatus.length} văn bản
           </h3>
-          <span className="text-[11px] text-slate-400">Nhấn vào để chỉnh sửa</span>
+          <button
+            type="button"
+            onClick={() => setIsSearchOpen(true)}
+            aria-label="Tìm kiếm văn bản"
+            title="Tìm kiếm văn bản"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition shrink-0"
+          >
+            <Search className="w-4 h-4" strokeWidth={1.5} />
+          </button>
+
+          {isSearchOpen && (
+            <div className="absolute inset-x-0 -top-1 z-20 bg-white rounded-2xl border border-slate-200 shadow-lg px-3.5 py-2 flex items-center gap-2.5 animate-in fade-in zoom-in-95 duration-150">
+              <Search className="w-4 h-4 text-slate-400 shrink-0" strokeWidth={1.5} />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    handleCloseSearch();
+                  }
+                }}
+                placeholder="Nội dung muốn tìm kiếm"
+                className="w-full text-xs text-slate-700 placeholder-slate-400 outline-none bg-transparent"
+              />
+              <button
+                type="button"
+                onClick={handleCloseSearch}
+                aria-label="Hủy tìm kiếm"
+                title="Hủy tìm kiếm"
+                className="p-0.5 text-slate-400 hover:text-slate-600 transition shrink-0"
+              >
+                <X className="w-4 h-4" strokeWidth={1.5} />
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="space-y-2 flex-1 overflow-y-auto pr-1">
