@@ -44,3 +44,21 @@ body {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
 }
+
+@keyframes golden-blink {
+  0%, 100% {
+    color: #d97706;
+    filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.95)) drop-shadow(0 0 2px rgba(251, 191, 36, 0.8));
+    transform: scale(1.08);
+  }
+  50% {
+    color: #fbbf24;
+    filter: drop-shadow(0 0 1px rgba(245, 158, 11, 0.25));
+    transform: scale(1);
+  }
+}
+
+.animate-golden-blink {
+  animation: golden-blink 1.2s ease-in-out infinite;
+}
+

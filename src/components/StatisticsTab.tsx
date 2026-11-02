@@ -430,9 +430,9 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             onClick={() => setIsSearchOpen(true)}
             aria-label="Tìm kiếm văn bản"
             title="Tìm kiếm văn bản"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition shrink-0"
+            className="p-1.5 rounded-lg bg-transparent font-bold transition shrink-0"
           >
-            <Search className="w-4 h-4" strokeWidth={1.5} />
+            <Search className="w-4 h-4 animate-golden-blink" strokeWidth={3} />
           </button>
 
           {isSearchOpen && (
