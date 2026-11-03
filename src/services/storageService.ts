@@ -376,6 +376,7 @@ export function getEnrichedReports(state: AppDataState): EnrichedReport[] {
         precision: sched.precision,
         schedule_start: sched.start_date,
         document_id: doc.id,
+        issued: doc.issued,
         number: doc.number,
         symbol: doc.symbol,
         summary: doc.summary,

@@ -10,9 +10,10 @@ import {
   TrendingUp,
   PlusCircle,
   CalendarDays,
+  Edit2,
 } from 'lucide-react';
 import { EnrichedReport, EnrichedDocument } from '../types';
-import { formatDocCode } from '../utils/dateUtils';
+import { formatDocCode, displayDate } from '../utils/dateUtils';
 
 interface DashboardTabProps {
   documents: EnrichedDocument[];
@@ -21,6 +22,7 @@ interface DashboardTabProps {
   onToggleReportComplete: (reportId: string) => void;
   onNavigateToTab: (tab: 'documents' | 'reports' | 'calendar', filter?: string, period?: { mode: 'Toàn bộ' | 'Tháng' | 'Quý' | 'Năm'; year: number; month: number; quarter: number }) => void;
   onAddNewDocument: () => void;
+  onEditDocument: (doc: EnrichedDocument) => void;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
@@ -30,6 +32,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onToggleReportComplete,
   onNavigateToTab,
   onAddNewDocument,
+  onEditDocument,
 }) => {
   const now = new Date();
   const [periodMode, setPeriodMode] = useState<'Toàn bộ' | 'Tháng' | 'Quý' | 'Năm'>('Toàn bộ');
@@ -347,9 +350,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   <div className="flex items-start justify-between gap-2">
                     <div className="space-y-1 flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-xs font-bold text-slate-900 font-mono">
-                          {formatDocCode(item.number, item.symbol)}
-                        </span>
+                        <FullTextPopover
+                          text={formatDocCode(item.number, item.symbol)}
+                          popupContent={`Ngày ban hành: ${displayDate(item.issued) || 'Chưa rõ'}`}
+                          fitWidth
+                          className="text-xs font-bold text-slate-900 hover:text-blue-700 font-mono underline decoration-dotted decoration-slate-400 underline-offset-2 transition-colors"
+                        />
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-white/80 border border-slate-200 text-slate-600">
                           {item.kind}
                         </span>
@@ -377,18 +383,29 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                     </div>
 
                     {/* Actions */}
-                    <div className="flex flex-col gap-1.5 shrink-0">
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
                       <button
                         onClick={() => onToggleReportComplete(item.id)}
-                        className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition active:scale-95 whitespace-nowrap"
+                        className="w-full text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition active:scale-95 whitespace-nowrap"
                       >
                         Hoàn thành
                       </button>
                       <button
                         onClick={() => onOpenReportResult(item.id)}
-                        className="text-[10px] font-medium px-2 py-1 rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition whitespace-nowrap"
+                        className="w-full text-[10px] font-medium px-2 py-1 rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition whitespace-nowrap"
                       >
                         Kết quả...
+                      </button>
+                      <button
+                        onClick={() => {
+                          const targetDoc = documents.find((d) => d.id === item.document_id);
+                          if (targetDoc) onEditDocument(targetDoc);
+                        }}
+                        className="p-1.5 rounded-lg bg-white/80 border border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition active:scale-95"
+                        title="Chỉnh sửa văn bản"
+                        aria-label="Chỉnh sửa văn bản"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>

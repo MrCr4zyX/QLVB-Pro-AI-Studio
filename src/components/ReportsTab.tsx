@@ -12,9 +12,10 @@ import {
   FileCheck2,
   Building2,
   Check,
+  Edit2,
 } from 'lucide-react';
 import { EnrichedReport } from '../types';
-import { searchKey, formatDocCode } from '../utils/dateUtils';
+import { searchKey, formatDocCode, displayDate } from '../utils/dateUtils';
 
 interface ReportsTabProps {
   reports: EnrichedReport[];
@@ -22,6 +23,7 @@ interface ReportsTabProps {
   initialPeriod?: { mode: 'Toàn bộ' | 'Tháng' | 'Quý' | 'Năm'; year: number; month: number; quarter: number } | null;
   onOpenReportResult: (reportId: string) => void;
   onToggleReportComplete: (reportId: string) => void;
+  onEditDocumentById: (docId: string) => void;
 }
 
 export const ReportsTab: React.FC<ReportsTabProps> = ({
@@ -30,6 +32,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
   initialPeriod,
   onOpenReportResult,
   onToggleReportComplete,
+  onEditDocumentById,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>(initialFilter || '30 ngày');
@@ -193,9 +196,12 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
                   <div className="space-y-1 flex-1 min-w-0">
                     {/* Header tags */}
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs font-bold text-slate-900 font-mono">
-                        {formatDocCode(report.number, report.symbol)}
-                      </span>
+                      <FullTextPopover
+                        text={formatDocCode(report.number, report.symbol)}
+                        popupContent={`Ngày ban hành: ${displayDate(report.issued) || 'Chưa rõ'}`}
+                        fitWidth
+                        className="text-xs font-bold text-slate-900 hover:text-blue-700 font-mono underline decoration-dotted decoration-slate-400 underline-offset-2 transition-colors"
+                      />
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">
                         {report.kind}
                       </span>
@@ -240,10 +246,10 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
                   </div>
 
                   {/* Right Action buttons */}
-                  <div className="flex flex-col gap-1.5 shrink-0 pt-0.5">
+                  <div className="flex flex-col items-end gap-1.5 shrink-0 pt-0.5">
                     <button
                       onClick={() => onToggleReportComplete(report.id)}
-                      className={`text-xs font-bold px-2.5 py-1.5 rounded-xl transition flex items-center justify-center gap-1 active:scale-95 shadow-xs ${
+                      className={`w-full text-xs font-bold px-2.5 py-1.5 rounded-xl transition flex items-center justify-center gap-1 active:scale-95 shadow-xs ${
                         isDone
                           ? 'bg-amber-100 hover:bg-amber-200 text-amber-800'
                           : 'bg-emerald-600 hover:bg-emerald-700 text-white'
@@ -265,9 +271,18 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
 
                     <button
                       onClick={() => onOpenReportResult(report.id)}
-                      className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition"
+                      className="w-full text-[10px] font-semibold px-2 py-1 rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition"
                     >
                       Kết quả...
+                    </button>
+
+                    <button
+                      onClick={() => onEditDocumentById(report.document_id)}
+                      className="p-1.5 rounded-lg bg-white/80 border border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition active:scale-95"
+                      title="Chỉnh sửa văn bản"
+                      aria-label="Chỉnh sửa văn bản"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>

@@ -421,6 +421,7 @@ export default function App() {
               setCurrentTab(tab);
             }}
             onAddNewDocument={() => handleOpenDocModal()}
+            onEditDocument={(doc) => handleOpenDocModal(doc)}
           />
         )}
 
@@ -449,6 +450,10 @@ export default function App() {
             initialFilter={reportsInitialFilter}
             onOpenReportResult={handleOpenReportResult}
             onToggleReportComplete={handleToggleReportComplete}
+            onEditDocumentById={(docId) => {
+              const targetDoc = enrichedDocuments.find((d) => d.id === docId);
+              if (targetDoc) handleOpenDocModal(targetDoc);
+            }}
           />
         )}
 

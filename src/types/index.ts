@@ -93,6 +93,7 @@ export interface EnrichedReport extends ReportHistory {
   precision: DatePrecision;
   schedule_start: string | null;
   document_id: string;
+  issued: string;
   number: string;
   symbol: string;
   summary: string;

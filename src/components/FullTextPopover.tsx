@@ -3,11 +3,18 @@ import { createPortal } from 'react-dom';
 
 interface FullTextPopoverProps {
   text?: string | null;
+  popupContent?: string | null;
   className?: string;
+  fitWidth?: boolean;
 }
 
 /** Hover with a mouse, or tap/click once. Outside tap, swipe or scroll closes it. */
-export const FullTextPopover: React.FC<FullTextPopoverProps> = ({ text, className = '' }) => {
+export const FullTextPopover: React.FC<FullTextPopoverProps> = ({
+  text,
+  popupContent,
+  className = '',
+  fitWidth = false,
+}) => {
   const triggerRef = useRef<HTMLSpanElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -22,14 +29,14 @@ export const FullTextPopover: React.FC<FullTextPopoverProps> = ({ text, classNam
   const show = useCallback((pin: boolean) => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const width = Math.min(380, Math.max(200, window.innerWidth - 24));
+    const width = fitWidth ? 230 : Math.min(380, Math.max(200, window.innerWidth - 24));
     const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
     const below = window.innerHeight - rect.bottom;
     const top = below >= 180 || below >= rect.top ? rect.bottom + 6 : 12;
     setPosition({ top, left, width });
     setPinned(pin);
     setOpen(true);
-  }, []);
+  }, [fitWidth]);
 
   useEffect(() => {
     if (!open) return;
@@ -46,16 +53,17 @@ export const FullTextPopover: React.FC<FullTextPopoverProps> = ({ text, classNam
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', close);
-    document.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', close);
-      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey);
     };
   }, [open, close]);
 
   if (!text) return null;
+  const displayPopup = popupContent || text;
   return <>
     <span
       ref={triggerRef}
@@ -85,18 +93,20 @@ export const FullTextPopover: React.FC<FullTextPopoverProps> = ({ text, classNam
         ref={panelRef}
         role="dialog"
         aria-label="Nội dung đầy đủ"
-        className="fixed z-[9999] rounded-xl border border-blue-200 bg-white p-3 shadow-2xl text-sm text-slate-800 whitespace-pre-wrap break-words overflow-y-auto"
+        className={`fixed z-[9999] rounded-xl border border-blue-200 bg-white shadow-2xl text-slate-800 whitespace-pre-wrap break-words overflow-y-auto ${
+          fitWidth ? 'px-3 py-2 text-xs font-semibold w-max max-w-[90vw]' : 'p-3 text-sm'
+        }`}
         style={{
           top: position.top,
           left: position.left,
-          width: position.width,
+          ...(fitWidth ? {} : { width: position.width }),
           maxHeight: `calc(100dvh - ${position.top + 12}px)`,
-          minHeight: 35,
+          minHeight: fitWidth ? 28 : 35,
         }}
         onPointerLeave={(event) => {
           if (!pinned && event.pointerType === 'mouse' && !triggerRef.current?.contains(event.relatedTarget as Node)) close();
         }}
-      >{text}</div>,
+      >{displayPopup}</div>,
       document.body
     )}
   </>;
