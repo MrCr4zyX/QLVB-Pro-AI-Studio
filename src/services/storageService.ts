@@ -28,6 +28,7 @@ export const DEFAULT_DOCUMENT_TYPES: DocumentType[] = [
   { id: 9, name: 'Công văn', active: 1 },
   { id: 10, name: 'Kế hoạch', active: 1 },
   { id: 11, name: 'Hướng dẫn', active: 1 },
+  { id: 13, name: 'Quy định', active: 1 },
   { id: 12, name: 'Khác', active: 1 },
 ];
 
@@ -37,7 +38,11 @@ export const DEFAULT_WORK_FIELDS: WorkField[] = [
   { id: 3, name: 'Chính trị tư tưởng', active: 1 },
   { id: 4, name: 'Tham mưu - Tổng hợp', active: 1 },
   { id: 5, name: 'Huấn luyện', active: 1 },
-  { id: 6, name: 'Hậu cần - Kỹ thuật', active: 1 },
+  { id: 6, name: 'Hậu cần - Tài chính', active: 1 },
+  { id: 8, name: 'Tuyển sinh - Đào tạo', active: 1 },
+  { id: 9, name: 'Công tác quần chúng', active: 1 },
+  { id: 10, name: 'Chế độ chính sách', active: 1 },
+  { id: 11, name: 'Bảo vệ nội bộ', active: 1 },
   { id: 7, name: 'Khác', active: 1 },
 ];
 
@@ -291,7 +296,9 @@ export function loadAppData(): AppDataState {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.documents)) {
-        return ensureSchedulesAndReports(parsed);
+        const synced = ensureSchedulesAndReports(parsed);
+        saveAppData(synced);
+        return synced;
       }
     }
   } catch (e) {
@@ -315,7 +322,7 @@ export function saveAppData(state: AppDataState): void {
 }
 
 /**
- * Ensures all schedules have up-to-date due dates in report_history
+ * Ensures all schedules have up-to-date due dates in report_history and syncs catalog defaults
  */
 export function ensureSchedulesAndReports(state: AppDataState): AppDataState {
   const today = new Date();
@@ -344,8 +351,45 @@ export function ensureSchedulesAndReports(state: AppDataState): AppDataState {
     }
   }
 
+  // Đồng bộ danh mục Loại văn bản với danh mục mặc định mới
+  const existingDocTypes = Array.isArray(state.documentTypes) ? [...state.documentTypes] : [];
+  for (const defType of DEFAULT_DOCUMENT_TYPES) {
+    const hasMatch = existingDocTypes.some(
+      (t) => t.id === defType.id || t.name.trim().toLowerCase() === defType.name.trim().toLowerCase()
+    );
+    if (!hasMatch) {
+      existingDocTypes.push({ ...defType });
+    }
+  }
+  const sortedDocTypes = [
+    ...existingDocTypes.filter((t) => t.name.trim().toLowerCase() !== 'khác'),
+    ...existingDocTypes.filter((t) => t.name.trim().toLowerCase() === 'khác'),
+  ];
+
+  // Đồng bộ danh mục Lĩnh vực công tác (thay Hậu cần - Kỹ thuật -> Hậu cần - Tài chính và bổ sung lĩnh vực mới)
+  const existingWorkFields = (Array.isArray(state.workFields) ? [...state.workFields] : []).map((f) => {
+    if (f.id === 6 || f.name.trim().toLowerCase() === 'hậu cần - kỹ thuật') {
+      return { ...f, name: 'Hậu cần - Tài chính' };
+    }
+    return f;
+  });
+  for (const defField of DEFAULT_WORK_FIELDS) {
+    const hasMatch = existingWorkFields.some(
+      (f) => f.id === defField.id || f.name.trim().toLowerCase() === defField.name.trim().toLowerCase()
+    );
+    if (!hasMatch) {
+      existingWorkFields.push({ ...defField });
+    }
+  }
+  const sortedWorkFields = [
+    ...existingWorkFields.filter((f) => f.name.trim().toLowerCase() !== 'khác'),
+    ...existingWorkFields.filter((f) => f.name.trim().toLowerCase() === 'khác'),
+  ];
+
   return {
     ...state,
+    documentTypes: sortedDocTypes,
+    workFields: sortedWorkFields,
     reports: newReports,
   };
 }

@@ -426,7 +426,7 @@ function importSimplifiedSheet(
       updated: new Date().toISOString(),
       security_level: 'Thường',
       type_id: 1,
-      effect_status: 'Còn hiệu lực',
+      effect_status: 'Cần rà soát',
       expiry_date: null,
       amendment_text: '',
     };

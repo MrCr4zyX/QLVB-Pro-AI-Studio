@@ -107,7 +107,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const agencyHistory = useMemo(() => Array.from(new Set(['Bộ Công an', ...allDocuments.map(d => (d.agency || '').trim())].filter(Boolean))).sort((a, b) => a.localeCompare(b, 'vi')), [allDocuments]);
   const [typeId, setTypeId] = useState<number>(1);
   const [selectedFields, setSelectedFields] = useState<number[]>([]);
-  const [effectStatus, setEffectStatus] = useState<EffectStatus>('Còn hiệu lực');
+  const [effectStatus, setEffectStatus] = useState<EffectStatus>('Cần rà soát');
   const [expiryDate, setExpiryDate] = useState('');
   const [summary, setSummary] = useState('');
   const [notes, setNotes] = useState('');
@@ -140,7 +140,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       setAgency(documentToEdit.agency || '');
       setTypeId(documentToEdit.type_id || 1);
       setSelectedFields(existingFieldIds);
-      setEffectStatus(documentToEdit.effect_status || 'Còn hiệu lực');
+      setEffectStatus(documentToEdit.effect_status || 'Cần rà soát');
       setExpiryDate(displayDate(documentToEdit.expiry_date));
       setSummary(documentToEdit.summary || '');
       setNotes(documentToEdit.notes || '');
@@ -199,7 +199,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       setAgency('Bộ Công an');
       setTypeId(10); // Kế hoạch
       setSelectedFields([4]); // Tham mưu
-      setEffectStatus('Còn hiệu lực');
+      setEffectStatus('Cần rà soát');
       setExpiryDate('');
       setSummary('');
       setNotes('');
