@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
+    "start": "node server.ts",
     "build": "vite build",
     "build:apk": "npm run build && python3 scripts/package_apk.py",
     "preview": "vite preview",

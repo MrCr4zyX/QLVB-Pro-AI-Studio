@@ -46,6 +46,8 @@ jobs:
       # 7. Build React (va don dep file thua truoc khi dua vao APK)
       - name: Build React app
         shell: bash
+        env:
+          VITE_SCAN_API_URL: ${{ secrets.VITE_SCAN_API_URL }}
         run: |
           npm run build
           rm -rf dist/*.apk dist/*.zip dist/*.idsig dist/assets/aistudio
