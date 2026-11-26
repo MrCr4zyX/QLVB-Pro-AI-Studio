@@ -17,6 +17,7 @@ import {
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import appLogo from '../assets/app-logo.png';
 import { googleSignIn, uploadApkToDrive } from '../services/googleDriveService';
+import { showToast } from './AppFeedback';
 
 interface InstallApkModalProps {
   isOpen: boolean;
@@ -109,7 +110,7 @@ export const InstallApkModal: React.FC<InstallApkModalProps> = ({ isOpen, onClos
       if (driveLink) {
         window.open(driveLink, '_blank');
       } else {
-        alert('Lỗi khi tải tệp. Vui lòng mở tab "Đồng bộ" để kết nối Google Drive và tải lên Drive.');
+        showToast('Lỗi khi tải tệp. Vui lòng mở mục "Đồng bộ" để kết nối Google Drive và tải lên Drive.', 'error');
       }
     } finally {
       setIsDownloading(false);

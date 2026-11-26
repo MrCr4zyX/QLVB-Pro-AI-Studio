@@ -91,18 +91,18 @@ export function notifyAndroidNative(title: string, message: string): boolean {
     if (typeof window !== 'undefined') {
       const bridge = (window as unknown as {
         AndroidBridge?: {
-          showNotification?: (t: string, m: string) => void;
-          triggerNativeNotification?: (t: string, m: string) => void;
+          showNotification?: (t: string, m: string) => boolean | void;
+          triggerNativeNotification?: (t: string, m: string) => boolean | void;
         };
       }).AndroidBridge;
       if (bridge) {
         if (typeof bridge.showNotification === 'function') {
-          bridge.showNotification(title, message);
-          return true;
+          const result = bridge.showNotification(title, message);
+          return result !== false;
         }
         if (typeof bridge.triggerNativeNotification === 'function') {
-          bridge.triggerNativeNotification(title, message);
-          return true;
+          const result = bridge.triggerNativeNotification(title, message);
+          return result !== false;
         }
       }
     }

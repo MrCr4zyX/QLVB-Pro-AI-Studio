@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, RotateCcw, FileText, Calendar, Save, History } from 'lucide-react';
 import { EnrichedReport, ResultAudit } from '../types';
 import { displayDate, parseDateInput, formatDateInputMask } from '../utils/dateUtils';
+import { showToast, showConfirm } from './AppFeedback';
 
 interface ReportResultModalProps {
   isOpen: boolean;
@@ -47,7 +48,7 @@ export const ReportResultModal: React.FC<ReportResultModalProps> = ({
     e.preventDefault();
     const iso = parseDateInput(completedDate);
     if (!iso) {
-      alert('Vui lòng nhập ngày hoàn thành hợp lệ (dd/mm/yyyy)');
+      showToast('Vui lòng nhập ngày hoàn thành hợp lệ (dd/mm/yyyy)', 'warning');
       return;
     }
 
@@ -61,8 +62,14 @@ export const ReportResultModal: React.FC<ReportResultModalProps> = ({
     onClose();
   };
 
-  const handleUndo = () => {
-    if (confirm('Chuyển kỳ báo cáo này về chưa hoàn thành? Thông tin kết quả vẫn được giữ để tra cứu.')) {
+  const handleUndo = async () => {
+    const confirmed = await showConfirm({
+      title: 'Hoàn tác kỳ báo cáo',
+      message: 'Chuyển kỳ báo cáo này về chưa hoàn thành? Thông tin kết quả vẫn được giữ để tra cứu.',
+      confirmText: 'Hoàn tác',
+      cancelText: 'Hủy',
+    });
+    if (confirmed) {
       onUndoReport(report.id);
       onClose();
     }

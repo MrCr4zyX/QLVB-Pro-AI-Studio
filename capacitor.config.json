@@ -13,7 +13,7 @@
       "backgroundColor": "#FFFFFF"
     },
     "LocalNotifications": {
-      "smallIcon": "ic_launcher_foreground",
+      "smallIcon": "ic_stat_k02",
       "iconColor": "#1E40AF",
       "sound": "default"
     }

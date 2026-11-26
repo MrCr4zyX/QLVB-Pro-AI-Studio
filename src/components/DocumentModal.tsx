@@ -11,6 +11,7 @@ import {
 import { displayDate, parseDateInput, parseFlexibleDate, searchKey, formatDateInputMask } from '../utils/dateUtils';
 import { ATTACHMENT_PREFIX, getAttachment, saveAttachment, openAttachment, chooseAttachmentFolder } from '../services/attachmentService';
 import { prepareImageForScan, scanDocumentImage, ScanMode, ScanEngine } from '../utils/documentScanner';
+import { showToast } from './AppFeedback';
 
 interface DocumentModalProps {
   isOpen: boolean;
@@ -22,6 +23,9 @@ interface DocumentModalProps {
   allDocuments: Document[];
   documentTypes: DocumentType[];
   workFields: WorkField[];
+  initialScanFile?: File | null;
+  autoOpenCamera?: boolean;
+  onConsumeInitialScan?: () => void;
 }
 
 // Editable combo box: offers existing values without restricting free typing.
@@ -98,6 +102,9 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   allDocuments,
   documentTypes,
   workFields,
+  initialScanFile = null,
+  autoOpenCamera = false,
+  onConsumeInitialScan,
 }) => {
   const [issued, setIssued] = useState('');
   const [number, setNumber] = useState('');
@@ -246,8 +253,9 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       const reference = await saveAttachment(file);
       setAttachment(reference);
       setAttachmentName(file.name);
+      showToast(`Đã đính kèm tệp "${file.name}"`, 'success');
     } catch (error) {
-      alert('Không lưu được file đính kèm: ' + (error instanceof Error ? error.message : String(error)));
+      showToast('Không lưu được file đính kèm: ' + (error instanceof Error ? error.message : String(error)), 'error');
     } finally {
       setAttachmentBusy(false);
       if (attachmentInputRef.current) attachmentInputRef.current.value = '';
@@ -257,14 +265,14 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const handleOpenAttachment = async () => {
     if (!attachment.trim()) return;
     try { await openAttachment(attachment.trim()); }
-    catch (error) { alert(error instanceof Error ? error.message : String(error)); }
+    catch (error) { showToast(error instanceof Error ? error.message : String(error), 'error'); }
   };
 
   const handleOpenFolder = async () => {
     try { await chooseAttachmentFolder(attachmentName); }
     catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
-      alert(error instanceof Error ? error.message : String(error));
+      showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   };
 
@@ -579,6 +587,18 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     setScanPreviewUrl(null);
   };
 
+  // Auto-trigger quick scan when launched from the floating Camera FAB
+  useEffect(() => {
+    if (!isOpen) return;
+    if (initialScanFile) {
+      handleScanFile(initialScanFile);
+      onConsumeInitialScan?.();
+    } else if (autoOpenCamera) {
+      handleOpenCamera();
+      onConsumeInitialScan?.();
+    }
+  }, [isOpen, initialScanFile, autoOpenCamera]);
+
   if (!isOpen) return null;
 
   const toggleFieldSelection = (fieldId: number) => {
@@ -615,17 +635,17 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     e.preventDefault();
 
     if (!number.trim() || !symbol.trim()) {
-      alert('Vui lòng nhập Số văn bản và Ký hiệu!');
+      showToast('Vui lòng nhập Số văn bản và Ký hiệu!', 'warning');
       return;
     }
     if (!summary.trim()) {
-      alert('Vui lòng nhập Trích yếu nội dung!');
+      showToast('Vui lòng nhập Trích yếu nội dung!', 'warning');
       return;
     }
 
     const issuedIso = parseDateInput(issued);
     if (!issuedIso) {
-      alert('Ngày ban hành không hợp lệ (định dạng dd/mm/yyyy)');
+      showToast('Ngày ban hành không hợp lệ (định dạng dd/mm/yyyy)', 'warning');
       return;
     }
 
@@ -643,7 +663,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         if (item.repeatRule === 'Hằng năm') {
           const parts = v.split('/');
           if (parts.length !== 2 || !parts.every((p) => /^\d+$/.test(p))) {
-            alert(`${item.kind}: Vui lòng nhập ngày/tháng hợp lệ (ví dụ: 15/10)`);
+            showToast(`${item.kind}: Vui lòng nhập ngày/tháng hợp lệ (ví dụ: 15/10)`, 'warning');
             return;
           }
           const [d, m] = parts.map((p) => parseInt(p, 10));
@@ -661,12 +681,12 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         } else {
           // Hằng tháng hoặc Hằng quý: nhập ngày trong tháng (1-31).
           if (!/^\d{1,2}$/.test(v)) {
-            alert(`${item.kind}: Vui lòng nhập ngày từ 1 đến 31`);
+            showToast(`${item.kind}: Vui lòng nhập ngày từ 1 đến 31`, 'warning');
             return;
           }
           const dayNum = Number(v);
           if (dayNum < 1 || dayNum > 31) {
-            alert(`${item.kind}: Ngày báo cáo phải là số từ 1 đến 31`);
+            showToast(`${item.kind}: Ngày báo cáo phải là số từ 1 đến 31`, 'warning');
             return;
           }
           parsedSchedules.push({
@@ -682,7 +702,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       } else {
         // Sắp tới, Sơ kết, Tổng kết
         if (!v) {
-          alert(`${item.kind}: Đã chọn nhưng chưa nhập thời hạn!`);
+          showToast(`${item.kind}: Đã chọn nhưng chưa nhập thời hạn!`, 'warning');
           return;
         }
 
@@ -698,7 +718,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             precision,
           });
         } catch (err: any) {
-          alert(`${item.kind}: ${err.message}`);
+          showToast(`${item.kind}: ${err.message}`, 'warning');
           return;
         }
       }

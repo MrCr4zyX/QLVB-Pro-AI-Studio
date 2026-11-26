@@ -27,7 +27,7 @@ import { DocumentModal } from './components/DocumentModal';
 import { ReportResultModal } from './components/ReportResultModal';
 import { NotificationModal } from './components/NotificationModal';
 import { InstallApkModal } from './components/InstallApkModal';
-import { FloatingNotification } from './components/FloatingNotification';
+import { AppFeedbackHost, showConfirm, showToast } from './components/AppFeedback';
 const splashPreviewImage = './app-logo.png';
 
 export default function App() {
@@ -54,6 +54,8 @@ export default function App() {
   // Modals state
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [docToEdit, setDocToEdit] = useState<Document | null>(null);
+  const [quickScanFile, setQuickScanFile] = useState<File | null>(null);
+  const [quickScanAutoCamera, setQuickScanAutoCamera] = useState(false);
 
   const [isReportResultModalOpen, setIsReportResultModalOpen] = useState(false);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -109,31 +111,10 @@ export default function App() {
     overdueCount,
     totalAlertsCount,
     isBackupReminderDue,
-    weeklyBackupCycleKey,
     dismissScheduledBackupReminder,
     permission,
     requestPermission,
   } = useNotifications(enrichedReports);
-
-  // Show startup alert if overdue or urgent deadlines exist (matching PC 3.5.10 startup popup)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (
-      params.get('apk_auth') === '1' ||
-      params.get('auto_oauth') === '1' ||
-      params.get('pwa_origin') ||
-      params.get('code') ||
-      (window.location.hash || '').includes('access_token=') ||
-      window.location.pathname.includes('/__/auth/handler')
-    ) {
-      return;
-    }
-    const hasSeenTodayAlert = sessionStorage.getItem('k02_startup_alert_shown');
-    if (!hasSeenTodayAlert && alertReports.length > 0) {
-      sessionStorage.setItem('k02_startup_alert_shown', 'true');
-      setIsNotificationModalOpen(true);
-    }
-  }, [alertReports.length]);
 
   // Selected report for result editor
   const currentReportForEditor = useMemo(() => {
@@ -157,6 +138,20 @@ export default function App() {
   // Action Handlers
   const handleOpenDocModal = (doc?: EnrichedDocument) => {
     setDocToEdit(doc || null);
+    setQuickScanFile(null);
+    setQuickScanAutoCamera(false);
+    setIsDocModalOpen(true);
+  };
+
+  const handleQuickScanDocument = (file: File | null) => {
+    setDocToEdit(null);
+    if (file) {
+      setQuickScanFile(file);
+      setQuickScanAutoCamera(false);
+    } else {
+      setQuickScanFile(null);
+      setQuickScanAutoCamera(true);
+    }
     setIsDocModalOpen(true);
   };
 
@@ -204,17 +199,27 @@ export default function App() {
 
       return ensureSchedulesAndReports(nextState);
     });
+    showToast(
+      docToEdit
+        ? `Đã cập nhật văn bản ${docData.number}/${docData.symbol}`
+        : `Đã thêm văn bản ${docData.number}/${docData.symbol}`,
+      'success'
+    );
   };
 
-  const handleDeleteDocument = (docId: string) => {
+  const handleDeleteDocument = async (docId: string) => {
     const doc = appState.documents.find((d) => d.id === docId);
     if (!doc) return;
 
-    if (
-      confirm(
-        `Xác nhận xóa văn bản ${doc.number}/${doc.symbol} cùng toàn bộ lịch báo cáo liên quan?`
-      )
-    ) {
+    const confirmed = await showConfirm({
+      title: 'Xóa văn bản',
+      message: `Xác nhận xóa văn bản ${doc.number}/${doc.symbol} cùng toàn bộ lịch báo cáo liên quan?`,
+      confirmText: 'Xóa',
+      cancelText: 'Hủy',
+      danger: true,
+    });
+
+    if (confirmed) {
       setAppState((prev) => {
         const schedulesToDelete = new Set(
           prev.schedules.filter((s) => s.document_id === docId).map((s) => s.id)
@@ -242,18 +247,23 @@ export default function App() {
           ],
         };
       });
+      showToast(`Đã xóa văn bản ${doc.number}/${doc.symbol}`, 'info');
     }
   };
 
   const handleToggleReportComplete = useCallback(
-    (reportId: string) => {
+    async (reportId: string) => {
       const report = appState.reports.find((r) => r.id === reportId);
       if (!report) return;
 
       if (report.completed_date) {
-        if (
-          confirm('Chuyển kỳ báo cáo này về chưa hoàn thành? Thông tin kết quả vẫn được giữ.')
-        ) {
+        const confirmed = await showConfirm({
+          title: 'Hoàn tác kỳ báo cáo',
+          message: 'Chuyển kỳ báo cáo này về chưa hoàn thành? Thông tin kết quả vẫn được giữ.',
+          confirmText: 'Hoàn tác',
+          cancelText: 'Hủy',
+        });
+        if (confirmed) {
           const now = new Date().toISOString();
           setAppState((prev) => ({
             ...prev,
@@ -276,6 +286,7 @@ export default function App() {
               ...prev.resultAudits,
             ],
           }));
+          showToast('Đã chuyển kỳ báo cáo về trạng thái chưa hoàn thành.', 'info');
         }
       } else {
         // Open result editor to enter details or quick complete
@@ -379,30 +390,19 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] w-full bg-slate-100 flex flex-col font-sans antialiased text-slate-800 select-none overflow-hidden relative">
-      {/* Floating Heads-up Notification Banner */}
-      <FloatingNotification
-        overdueCount={overdueCount}
-        urgentCount={Math.max(0, totalAlertsCount - overdueCount)}
-        isBackupReminderDue={isBackupReminderDue}
-        weeklyBackupCycleKey={weeklyBackupCycleKey}
-        onDismissBackupReminder={dismissScheduledBackupReminder}
-        onOpenDetails={() => setIsNotificationModalOpen(true)}
-        onBackupNow={() => setCurrentTab('sync')}
-      />
-
       {/* Top Header */}
       <Header
         unreadAlertsCount={totalAlertsCount}
+        isSyncActive={currentTab === 'sync'}
         onOpenNotifications={() => setIsNotificationModalOpen(true)}
         onOpenSync={() => setCurrentTab('sync')}
         onOpenInstallGuide={() => setIsInstallModalOpen(true)}
       />
 
-      {/* Offline Toast */}
+      {/* Offline Bar */}
       {!isOnline && (
-        <div className="bg-amber-600 text-white text-xs font-semibold py-1 px-4 text-center shrink-0 z-20 shadow-xs flex items-center justify-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-          <span>Chế độ ngoại tuyến (Offline) — Dữ liệu được lưu trữ trực tiếp trên thiết bị của bạn</span>
+        <div className="bg-amber-600 text-white text-xs font-semibold py-1 px-4 text-center shrink-0 z-20 shadow-xs">
+          Chế độ ngoại tuyến (Offline) — Dữ liệu đang lưu trữ trực tiếp trên thiết bị
         </div>
       )}
 
@@ -412,6 +412,12 @@ export default function App() {
           <DashboardTab
             documents={enrichedDocuments}
             reports={enrichedReports}
+            overdueAlertCount={overdueCount}
+            urgentAlertCount={Math.max(0, totalAlertsCount - overdueCount)}
+            isBackupReminderDue={isBackupReminderDue}
+            onOpenNotifications={() => setIsNotificationModalOpen(true)}
+            onOpenSync={() => setCurrentTab('sync')}
+            onDismissBackupReminder={dismissScheduledBackupReminder}
             onOpenReportResult={handleOpenReportResult}
             onToggleReportComplete={handleToggleReportComplete}
             onNavigateToTab={(tab, filter, period) => {
@@ -421,6 +427,7 @@ export default function App() {
               setCurrentTab(tab);
             }}
             onAddNewDocument={() => handleOpenDocModal()}
+            onQuickScan={handleQuickScanDocument}
             onEditDocument={(doc) => handleOpenDocModal(doc)}
           />
         )}
@@ -431,6 +438,7 @@ export default function App() {
             documentTypes={appState.documentTypes}
             workFields={appState.workFields}
             onAddNew={() => handleOpenDocModal()}
+            onQuickScan={handleQuickScanDocument}
             onEdit={(doc) => handleOpenDocModal(doc)}
             onDelete={handleDeleteDocument}
             onViewReportsForDoc={(docId) => {
@@ -499,7 +507,11 @@ export default function App() {
       {/* Modals */}
       <DocumentModal
         isOpen={isDocModalOpen}
-        onClose={() => setIsDocModalOpen(false)}
+        onClose={() => {
+          setIsDocModalOpen(false);
+          setQuickScanFile(null);
+          setQuickScanAutoCamera(false);
+        }}
         onSave={handleSaveDocument}
         documentToEdit={docToEdit}
         existingSchedules={docSchedules}
@@ -507,6 +519,12 @@ export default function App() {
         allDocuments={appState.documents}
         documentTypes={appState.documentTypes}
         workFields={appState.workFields}
+        initialScanFile={quickScanFile}
+        autoOpenCamera={quickScanAutoCamera}
+        onConsumeInitialScan={() => {
+          setQuickScanFile(null);
+          setQuickScanAutoCamera(false);
+        }}
       />
 
       <ReportResultModal
@@ -516,8 +534,14 @@ export default function App() {
           setSelectedReportId(null);
         }}
         report={currentReportForEditor}
-        onSaveResult={handleSaveReportResult}
-        onUndoReport={handleUndoReport}
+        onSaveResult={(...args) => {
+          handleSaveReportResult(...args);
+          showToast('Đã lưu kết quả kỳ báo cáo.', 'success');
+        }}
+        onUndoReport={(id) => {
+          handleUndoReport(id);
+          showToast('Đã hoàn tác kỳ báo cáo về chưa hoàn thành.', 'info');
+        }}
         resultAudits={appState.resultAudits}
       />
 
@@ -535,6 +559,8 @@ export default function App() {
         isOpen={isInstallModalOpen}
         onClose={() => setIsInstallModalOpen(false)}
       />
+
+      <AppFeedbackHost />
     </div>
   );
 }

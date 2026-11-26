@@ -1,10 +1,12 @@
 import { FullTextPopover } from './FullTextPopover';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Search,
   Filter,
   X,
   Plus,
+  Camera,
+  ArrowUpDown,
   FileText,
   Calendar,
   Building2,
@@ -12,18 +14,20 @@ import {
   Edit2,
   Trash2,
   Shield,
-  Layers,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
 import { EnrichedDocument, DocumentType, WorkField } from '../types';
 import { searchKey, displayDate, formatDocCode } from '../utils/dateUtils';
 
+type DocumentSortKey = 'issued_desc' | 'issued_asc' | 'number_asc' | 'recent';
+
 interface DocumentsTabProps {
   documents: EnrichedDocument[];
   documentTypes: DocumentType[];
   workFields: WorkField[];
   onAddNew: () => void;
+  onQuickScan: (file: File | null) => void;
   onEdit: (doc: EnrichedDocument) => void;
   onDelete: (docId: string) => void;
   onViewReportsForDoc: (docId: string) => void;
@@ -34,6 +38,7 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
   documentTypes,
   workFields,
   onAddNew,
+  onQuickScan,
   onEdit,
   onDelete,
   onViewReportsForDoc,
@@ -42,8 +47,10 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
   const [selectedType, setSelectedType] = useState<string>('Tất cả');
   const [selectedField, setSelectedField] = useState<string>('Tất cả');
   const [selectedEffect, setSelectedEffect] = useState<string>('Tất cả');
+  const [sortBy, setSortBy] = useState<DocumentSortKey>('issued_desc');
   const [showFilters, setShowFilters] = useState(false);
   const [expandedDocIds, setExpandedDocIds] = useState<Set<string>>(new Set());
+  const quickCameraInputRef = useRef<HTMLInputElement>(null);
 
   const toggleExpand = (id: string) => {
     setExpandedDocIds((prev) => {
@@ -54,10 +61,37 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
     });
   };
 
+  // Counts per effect_status (respecting search, type, and field filters)
+  const effectCounts = useMemo(() => {
+    const key = searchKey(searchTerm);
+    const counts = {
+      'Tất cả': 0,
+      'Còn hiệu lực': 0,
+      'Cần rà soát': 0,
+      'Hết hiệu lực': 0,
+    };
+
+    for (const d of documents) {
+      if (selectedType !== 'Tất cả' && d.typeName !== selectedType) continue;
+      if (selectedField !== 'Tất cả' && !d.fieldNames.includes(selectedField)) continue;
+      if (key) {
+        const haystack = searchKey(
+          `${d.number} ${d.symbol} ${d.agency} ${d.summary} ${d.notes} ${d.amendment_text} ${d.fieldNames.join(' ')}`
+        );
+        if (!haystack.includes(key)) continue;
+      }
+      counts['Tất cả']++;
+      if (d.effect_status === 'Còn hiệu lực') counts['Còn hiệu lực']++;
+      else if (d.effect_status === 'Cần rà soát') counts['Cần rà soát']++;
+      else if (d.effect_status === 'Hết hiệu lực') counts['Hết hiệu lực']++;
+    }
+    return counts;
+  }, [documents, searchTerm, selectedType, selectedField]);
+
   const filteredDocs = useMemo(() => {
     const key = searchKey(searchTerm);
 
-    return documents.filter((d) => {
+    const list = documents.filter((d) => {
       if (selectedType !== 'Tất cả' && d.typeName !== selectedType) return false;
       if (selectedField !== 'Tất cả' && !d.fieldNames.includes(selectedField)) return false;
       if (selectedEffect !== 'Tất cả' && d.effect_status !== selectedEffect) return false;
@@ -68,7 +102,23 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
       );
       return haystack.includes(key);
     });
-  }, [documents, searchTerm, selectedType, selectedField, selectedEffect]);
+
+    if (sortBy === 'recent') return list;
+
+    return [...list].sort((a, b) => {
+      if (sortBy === 'issued_desc') {
+        return (b.issued || '').localeCompare(a.issued || '');
+      }
+      if (sortBy === 'issued_asc') {
+        return (a.issued || '').localeCompare(b.issued || '');
+      }
+      // number_asc: natural numeric ordering
+      return `${a.number}/${a.symbol}`.localeCompare(`${b.number}/${b.symbol}`, 'vi', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+    });
+  }, [documents, searchTerm, selectedType, selectedField, selectedEffect, sortBy]);
 
   const activeFilterCount =
     (selectedType !== 'Tất cả' ? 1 : 0) +
@@ -80,6 +130,22 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
     setSelectedType('Tất cả');
     setSelectedField('Tất cả');
     setSelectedEffect('Tất cả');
+    setSortBy('issued_desc');
+  };
+
+  const handleQuickCameraFabClick = () => {
+    const isMobileDevice =
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+
+    // On phones/tablets, trigger native camera input synchronously inside user gesture
+    if (isMobileDevice || !navigator.mediaDevices?.getUserMedia) {
+      quickCameraInputRef.current?.click();
+      return;
+    }
+
+    // On desktop, open DocumentModal and launch live webcam viewfinder immediately
+    onQuickScan(null);
   };
 
   return (
@@ -118,6 +184,52 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
             </span>
           )}
         </button>
+      </div>
+
+      {/* Quick 1-Tap Status Filter Bar + Sort Selector */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+          {(['Tất cả', 'Còn hiệu lực', 'Cần rà soát', 'Hết hiệu lực'] as const).map((status) => {
+            const isActive = selectedEffect === status;
+            const count = effectCounts[status];
+            const activeColors = {
+              'Tất cả': 'bg-blue-700 text-white border-blue-700',
+              'Còn hiệu lực': 'bg-emerald-600 text-white border-emerald-600',
+              'Cần rà soát': 'bg-amber-600 text-white border-amber-600',
+              'Hết hiệu lực': 'bg-rose-600 text-white border-rose-600',
+            }[status];
+
+            return (
+              <button
+                key={status}
+                type="button"
+                onClick={() => setSelectedEffect(status)}
+                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold transition whitespace-nowrap shrink-0 tabular-nums ${
+                  isActive
+                    ? `${activeColors} shadow-xs`
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                {status} <span className={isActive ? 'opacity-90' : 'text-slate-400'}>({count})</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+          <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <select
+            aria-label="Sắp xếp danh sách văn bản"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as DocumentSortKey)}
+            className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-200 cursor-pointer"
+          >
+            <option value="issued_desc">Ngày BH mới nhất</option>
+            <option value="issued_asc">Ngày BH cũ nhất</option>
+            <option value="number_asc">Số văn bản (A → Z)</option>
+            <option value="recent">Mới cập nhật</option>
+          </select>
+        </div>
       </div>
 
       {/* Filter panel */}
@@ -392,16 +504,47 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
         )}
       </div>
 
-      {/* Floating Action Button (FAB) for Mobile */}
-      <button
-        onClick={onAddNew}
-        className="fixed right-4 z-40 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-all focus:outline-none ring-4 ring-white/90"
-        style={{ bottom: 'calc(8.25rem + env(safe-area-inset-bottom, 12px))' }}
-        aria-label="Thêm văn bản mới"
-        title="Thêm văn bản mới"
+      {/* Hidden Native Camera Input for Instant Mobile Quick Scan */}
+      <input
+        ref={quickCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            onQuickScan(file);
+          }
+          e.target.value = '';
+        }}
+      />
+
+      {/* Floating Action Buttons (Quick Scan Camera + Add Document) */}
+      <div
+        className="fixed right-4 z-40 flex flex-col items-center gap-3"
+        style={{ bottom: 'calc(5.25rem + env(safe-area-inset-bottom, 12px))' }}
       >
-        <Plus className="w-6 h-6" strokeWidth={2.5} />
-      </button>
+        <button
+          type="button"
+          onClick={handleQuickCameraFabClick}
+          className="w-13 h-13 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:from-amber-700 active:to-orange-700 text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ring-4 ring-white/90"
+          aria-label="Quét nhanh văn bản bằng camera"
+          title="Quét nhanh văn bản bằng camera (AI)"
+        >
+          <Camera className="w-5 h-5" strokeWidth={2.3} />
+        </button>
+
+        <button
+          type="button"
+          onClick={onAddNew}
+          className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ring-4 ring-white/90"
+          aria-label="Thêm văn bản mới"
+          title="Thêm văn bản mới"
+        >
+          <Plus className="w-6 h-6" strokeWidth={2.5} />
+        </button>
+      </div>
     </div>
   );
 };

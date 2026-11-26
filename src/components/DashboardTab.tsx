@@ -1,5 +1,5 @@
 import { FullTextPopover } from './FullTextPopover';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,6 +11,9 @@ import {
   PlusCircle,
   CalendarDays,
   Edit2,
+  DatabaseBackup,
+  X,
+  Camera,
 } from 'lucide-react';
 import { EnrichedReport, EnrichedDocument } from '../types';
 import { formatDocCode, displayDate } from '../utils/dateUtils';
@@ -18,22 +21,51 @@ import { formatDocCode, displayDate } from '../utils/dateUtils';
 interface DashboardTabProps {
   documents: EnrichedDocument[];
   reports: EnrichedReport[];
+  overdueAlertCount?: number;
+  urgentAlertCount?: number;
+  isBackupReminderDue?: boolean;
+  onOpenNotifications?: () => void;
+  onOpenSync?: () => void;
+  onDismissBackupReminder?: () => void;
   onOpenReportResult: (reportId: string) => void;
   onToggleReportComplete: (reportId: string) => void;
   onNavigateToTab: (tab: 'documents' | 'reports' | 'calendar', filter?: string, period?: { mode: 'Toàn bộ' | 'Tháng' | 'Quý' | 'Năm'; year: number; month: number; quarter: number }) => void;
   onAddNewDocument: () => void;
+  onQuickScan: (file: File | null) => void;
   onEditDocument: (doc: EnrichedDocument) => void;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
   documents,
   reports,
+  overdueAlertCount = 0,
+  urgentAlertCount = 0,
+  isBackupReminderDue = false,
+  onOpenNotifications,
+  onOpenSync,
+  onDismissBackupReminder,
   onOpenReportResult,
   onToggleReportComplete,
   onNavigateToTab,
   onAddNewDocument,
+  onQuickScan,
   onEditDocument,
 }) => {
+  const [alertDismissed, setAlertDismissed] = useState(false);
+  const quickCameraInputRef = useRef<HTMLInputElement>(null);
+
+  const handleQuickCameraFabClick = () => {
+    const isMobileDevice =
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+
+    if (isMobileDevice || !navigator.mediaDevices?.getUserMedia) {
+      quickCameraInputRef.current?.click();
+      return;
+    }
+
+    onQuickScan(null);
+  };
   const now = new Date();
   const [periodMode, setPeriodMode] = useState<'Toàn bộ' | 'Tháng' | 'Quý' | 'Năm'>('Toàn bộ');
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
@@ -117,6 +149,95 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <span>Thêm VB</span>
         </button>
       </div>
+
+      {/* Unified Compact Alert Strip (replaces overlapping startup modal + floating banner) */}
+      {!alertDismissed && (overdueAlertCount > 0 || urgentAlertCount > 0 || isBackupReminderDue) && (
+        <div
+          className={`rounded-2xl px-3 py-2.5 border flex items-center justify-between gap-2.5 text-xs ${
+            overdueAlertCount > 0
+              ? 'bg-rose-50/95 border-rose-200 text-rose-950'
+              : 'bg-amber-50/95 border-amber-200 text-amber-950'
+          }`}
+        >
+          <div className="flex items-start gap-2.5 min-w-0 flex-1">
+            {overdueAlertCount > 0 || urgentAlertCount > 0 ? (
+              <span className="relative inline-flex shrink-0 mt-0.5 items-center justify-center">
+                <span
+                  className={`absolute -inset-1 rounded-full animate-ping opacity-60 ${
+                    overdueAlertCount > 0 ? 'bg-rose-500' : 'bg-amber-500'
+                  }`}
+                />
+                <AlertTriangle
+                  className={`relative w-4 h-4 animate-pulse ${
+                    overdueAlertCount > 0 ? 'text-rose-600' : 'text-amber-600'
+                  }`}
+                />
+              </span>
+            ) : (
+              <span className="relative inline-flex shrink-0 mt-0.5 items-center justify-center">
+                <span className="absolute -inset-1 rounded-full bg-amber-500 animate-ping opacity-60" />
+                <DatabaseBackup className="relative w-4 h-4 text-amber-600 animate-pulse" />
+              </span>
+            )}
+            <div className="min-w-0 leading-snug space-y-0.5">
+              {(overdueAlertCount > 0 || urgentAlertCount > 0) && (
+                <div className="font-semibold text-[12px] tabular-nums">
+                  {overdueAlertCount > 0 && (
+                    <span className="text-rose-700 font-bold">{overdueAlertCount} quá hạn</span>
+                  )}
+                  {overdueAlertCount > 0 && urgentAlertCount > 0 && (
+                    <span className="mx-1.5 text-slate-400">·</span>
+                  )}
+                  {urgentAlertCount > 0 && (
+                    <span className="text-amber-800 font-bold">{urgentAlertCount} hạn gấp (≤ 7 ngày)</span>
+                  )}
+                </div>
+              )}
+              {isBackupReminderDue && (
+                <div className="text-[11px] font-medium text-slate-600">
+                  Hãy sao lưu dữ liệu định kỳ!
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {(overdueAlertCount > 0 || urgentAlertCount > 0) && onOpenNotifications && (
+              <button
+                type="button"
+                onClick={onOpenNotifications}
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white transition active:scale-95 whitespace-nowrap ${
+                  overdueAlertCount > 0
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-amber-600 hover:bg-amber-700'
+                }`}
+              >
+                Xem
+              </button>
+            )}
+            {isBackupReminderDue && onOpenSync && (
+              <button
+                type="button"
+                onClick={onOpenSync}
+                className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-white border border-amber-300 text-amber-900 hover:bg-amber-100/70 transition active:scale-95 whitespace-nowrap"
+              >
+                Sao lưu
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setAlertDismissed(true);
+                if (isBackupReminderDue) onDismissBackupReminder?.();
+              }}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-black/5 transition"
+              aria-label="Ẩn thông báo"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Period Filter Card */}
       <div className="bg-white rounded-2xl p-2.5 border border-slate-200/80 shadow-xs space-y-2">
@@ -415,6 +536,34 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           </div>
         )}
       </div>
+
+      {/* Hidden Native Camera Input for Instant Mobile Quick Scan */}
+      <input
+        ref={quickCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            onQuickScan(file);
+          }
+          e.target.value = '';
+        }}
+      />
+
+      {/* Floating Quick Scan Camera FAB */}
+      <button
+        type="button"
+        onClick={handleQuickCameraFabClick}
+        className="fixed right-4 z-40 w-14 h-14 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:from-amber-700 active:to-orange-700 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ring-4 ring-white/90"
+        style={{ bottom: 'calc(5.25rem + env(safe-area-inset-bottom, 12px))' }}
+        aria-label="Quét nhanh văn bản bằng camera"
+        title="Quét nhanh văn bản bằng camera (AI)"
+      >
+        <Camera className="w-6 h-6" strokeWidth={2.3} />
+      </button>
     </div>
   );
 };

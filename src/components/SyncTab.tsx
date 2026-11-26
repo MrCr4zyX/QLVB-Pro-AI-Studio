@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { showConfirm, showToast } from './AppFeedback';
 import {
   FileSpreadsheet,
   Upload,
@@ -787,12 +788,21 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     }
   };
 
-  const handleResetSampleData = () => {
-    if (window.confirm('Bạn có chắc chắn muốn đặt lại dữ liệu mẫu ban đầu? Toàn bộ dữ liệu hiện tại sẽ được thay thế bằng danh mục mẫu chuẩn K02.')) {
+  const handleResetSampleData = async () => {
+    const confirmed = await showConfirm({
+      title: 'Đặt lại dữ liệu mẫu K02',
+      message:
+        'Bạn có chắc chắn muốn đặt lại dữ liệu mẫu ban đầu? Toàn bộ dữ liệu hiện tại sẽ được thay thế bằng danh mục mẫu chuẩn K02.',
+      confirmText: 'Đặt lại',
+      cancelText: 'Hủy',
+      danger: true,
+    });
+    if (confirmed) {
       const initial = generateInitialData();
       onUpdateState(initial);
       playSuccessChime();
       notifyAndroidNative('K02 Mobile', 'Đã đặt lại dữ liệu mẫu K02 ban đầu');
+      showToast('Đã đặt lại dữ liệu mẫu K02 ban đầu thành công.', 'success');
       setImportStatus({
         type: 'success',
         message: 'Đã đặt lại dữ liệu mẫu K02 ban đầu thành công!',

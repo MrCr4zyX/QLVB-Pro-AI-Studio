@@ -1,3 +1,5 @@
+import { showToast } from '../components/AppFeedback';
+
 // Local browser attachment storage. References are saved in Document.attachment.
 // Files remain on this browser/device; they are NOT synchronized by JSON/Drive sync.
 const DB_NAME = 'k02_attachment_files_v1';
@@ -75,9 +77,9 @@ export async function chooseAttachmentFolder(fileName: string): Promise<void> {
   if (fileName) {
     try {
       await directory.getFileHandle(fileName);
-      alert(`Đã chọn thư mục chứa ${fileName}: ${directory.name}`);
+      showToast(`Đã chọn thư mục chứa ${fileName}: ${directory.name}`, 'success');
       return;
     } catch { /* The chosen folder does not contain this file. */ }
   }
-  alert(`Đã chọn thư mục: ${directory.name}. Trình duyệt không cho phép tự mở Explorer tại thư mục gốc của file.`);
+  showToast(`Đã chọn thư mục: ${directory.name}. Trình duyệt không cho phép tự mở Explorer tại thư mục gốc của file.`, 'info');
 }

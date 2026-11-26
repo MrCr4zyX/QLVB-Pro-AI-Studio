@@ -10,6 +10,7 @@ const hasAndroidBridge = (): boolean =>
   Boolean(
     (window as unknown as { AndroidBridge?: { showNotification?: unknown } }).AndroidBridge
   );
+const isStandaloneBridge = (): boolean => !NATIVE && hasAndroidBridge();
 
 const CHANNEL_ID = 'k02_urgent_alerts';
 const SCHEDULE_IDS = Array.from({ length: 14 }, (_, i) => 920100 + i);
@@ -231,12 +232,12 @@ export async function sendSystemPushNotification(
   body: string,
   autoRequestPermission = true
 ): Promise<boolean> {
-  // 1. Check Native AndroidBridge first (present in packaged APK)
-  if (notifyAndroidNative(title, body)) {
-    return true;
+  // 1. Standalone WebView APK (non-Capacitor) uses AndroidBridge directly
+  if (isStandaloneBridge()) {
+    return notifyAndroidNative(title, body);
   }
 
-  // 2. Check Capacitor Native platform
+  // 2. Capacitor Native Android/iOS platform
   if (NATIVE) {
     try {
       await ensureAndroidChannel();
@@ -245,6 +246,11 @@ export async function sendSystemPushNotification(
         permission = await LocalNotifications.requestPermissions();
       }
       if (permission.display !== 'granted') return false;
+
+      // Prefer instant native NotificationManager post via MainActivity bridge when available
+      if (hasAndroidBridge() && notifyAndroidNative(title, body)) {
+        return true;
+      }
 
       // Safe positive 32-bit integer ID for Android NotificationManager
       const notificationId = Math.floor(Math.random() * 1000000) + 1000;
@@ -256,7 +262,7 @@ export async function sendSystemPushNotification(
             title,
             body,
             channelId: CHANNEL_ID,
-            smallIcon: 'ic_launcher_foreground',
+            smallIcon: 'ic_stat_k02',
             iconColor: '#1E40AF',
             schedule: {
               at: new Date(Date.now() + 250),
@@ -327,7 +333,7 @@ async function updateNativeSchedules(reports: EnrichedReport[]): Promise<void> {
         title: '🔔 K02 - Nhắc hạn báo cáo',
         body: `Có ${count} kỳ báo cáo cần theo dõi trong 30 ngày tới. Mở K02 để kiểm tra.`,
         channelId: CHANNEL_ID,
-        smallIcon: 'ic_launcher_foreground',
+        smallIcon: 'ic_stat_k02',
         iconColor: '#1E40AF',
         schedule: { at, allowWhileIdle: true },
       });
@@ -342,7 +348,7 @@ async function updateNativeSchedules(reports: EnrichedReport[]): Promise<void> {
       title: '⚠️ CẢNH BÁO! Sao lưu dữ liệu K02',
       body: 'Hãy sao lưu dữ liệu định kỳ! Nhấn để mở ứng dụng và sao lưu ngay.',
       channelId: CHANNEL_ID,
-      smallIcon: 'ic_launcher_foreground',
+      smallIcon: 'ic_stat_k02',
       iconColor: '#EF4444',
       schedule: { at: slotDate, allowWhileIdle: true },
     });
@@ -355,7 +361,7 @@ async function updateNativeSchedules(reports: EnrichedReport[]): Promise<void> {
 
 export function useNotifications(reports: EnrichedReport[]) {
   const [permission, setPermission] = useState<NotificationPermission>(() => {
-    if (hasAndroidBridge()) return 'granted';
+    if (isStandaloneBridge()) return 'granted';
     if (!NATIVE && typeof window !== 'undefined' && 'Notification' in window) {
       return Notification.permission;
     }
@@ -415,7 +421,7 @@ export function useNotifications(reports: EnrichedReport[]) {
 
   const requestPermission = useCallback(async (): Promise<boolean> => {
     try {
-      if (hasAndroidBridge()) {
+      if (isStandaloneBridge()) {
         setPermission('granted');
         playAlertChime();
         notifyAndroidNative(
@@ -468,7 +474,7 @@ export function useNotifications(reports: EnrichedReport[]) {
 
   // Initialize channel & check permission on Android Native startup (auto-request if 'prompt')
   useEffect(() => {
-    if (hasAndroidBridge()) {
+    if (isStandaloneBridge()) {
       setPermission('granted');
       return;
     }
@@ -491,7 +497,7 @@ export function useNotifications(reports: EnrichedReport[]) {
   // Push startup notification to phone Status Bar once per session when alerts exist
   useEffect(() => {
     if (alertReports.length === 0) return;
-    if (permission !== 'granted' && !hasAndroidBridge()) return;
+    if (permission !== 'granted' && !isStandaloneBridge()) return;
     const startupPushKey = 'k02_startup_statusbar_pushed';
     if (sessionStorage.getItem(startupPushKey)) return;
     sessionStorage.setItem(startupPushKey, 'true');
