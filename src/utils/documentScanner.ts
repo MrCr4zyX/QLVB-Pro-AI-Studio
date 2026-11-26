@@ -39,12 +39,14 @@ export interface ScanOptions {
 const MAX_DIMENSION = 1600;
 const JPEG_QUALITY = 0.86;
 
+const DEFAULT_VERCEL_SCAN_ORIGIN = 'https://qlvb-pro-ai-studio.vercel.app';
+
 /**
  * Resolves the AI scan endpoint URL:
  * 1) Uses VITE_SCAN_API_URL if configured.
- * 2) On static hosts (GitHub Pages PWA / Capacitor APK), defaults to the app's Cloud Run backend (OAUTH_REDIRECT_ORIGIN/api/scan-document)
- *    so AI Online is ALWAYS prioritized when internet is available.
- * 3) On full-stack hosts (.run.app / localhost), uses relative /api/scan-document.
+ * 2) On static hosts (GitHub Pages PWA / Capacitor or WebView APK), defaults to the Vercel Serverless AI endpoint
+ *    (https://qlvb-pro-ai-studio.vercel.app/api/scan-document) so AI Online works automatically without Cloud Run billing.
+ * 3) On full-stack hosts (.vercel.app / .run.app / localhost), uses relative /api/scan-document.
  */
 export function resolveAiScanEndpoint(): { url: string; isCrossOrigin: boolean } {
   const configured = String(import.meta.env.VITE_SCAN_API_URL || '').trim().replace(/\/+$/, '');
@@ -59,12 +61,20 @@ export function resolveAiScanEndpoint(): { url: string; isCrossOrigin: boolean }
 
   if (typeof window !== 'undefined') {
     const { hostname, protocol } = window.location;
+    const win = window as any;
+    const isNativeBridgeApp =
+      typeof win.AndroidBridge !== 'undefined' ||
+      typeof win.Capacitor !== 'undefined';
     const isStaticOnlyHost =
+      isNativeBridgeApp ||
       hostname.endsWith('github.io') ||
+      hostname.endsWith('firebaseapp.com') ||
+      hostname.endsWith('web.app') ||
       protocol === 'capacitor:' ||
-      protocol === 'file:';
+      protocol === 'file:' ||
+      (hostname === 'localhost' && !window.location.port);
     if (isStaticOnlyHost) {
-      const base = OAUTH_REDIRECT_ORIGIN.replace(/\/+$/, '');
+      const base = (DEFAULT_VERCEL_SCAN_ORIGIN || OAUTH_REDIRECT_ORIGIN).replace(/\/+$/, '');
       return { url: `${base}/api/scan-document`, isCrossOrigin: true };
     }
   }
@@ -1016,27 +1026,42 @@ export async function scanDocumentImage(
 
   options.onProgress?.('AI trực tuyến đang phân tích số văn bản, ngày ban hành, trích yếu...');
 
-  try {
-    const response = await fetch(endpointUrl, {
+  const requestBody = JSON.stringify({
+    imageBase64: prepared.base64,
+    mimeType: prepared.mimeType,
+    documentTypes,
+    workFields,
+    knownAgencies: options.knownAgencies || [],
+  });
+
+  const postToAiEndpoint = async (url: string, crossOrigin: boolean) => {
+    const response = await fetch(url, {
       method: 'POST',
-      mode: isCrossOrigin ? 'cors' : 'same-origin',
+      mode: crossOrigin ? 'cors' : 'same-origin',
       headers: {
-        // Use text/plain for cross-origin calls to avoid CORS OPTIONS preflight blocking on shared gateways
-        'Content-Type': isCrossOrigin ? 'text/plain;charset=UTF-8' : 'application/json',
+        // Use text/plain for cross-origin calls to avoid CORS OPTIONS preflight blocking
+        'Content-Type': crossOrigin ? 'text/plain;charset=UTF-8' : 'application/json',
       },
-      body: JSON.stringify({
-        imageBase64: prepared.base64,
-        mimeType: prepared.mimeType,
-        documentTypes,
-        workFields,
-        knownAgencies: options.knownAgencies || [],
-      }),
+      body: requestBody,
       signal: options.signal,
     });
-
     const contentType = response.headers.get('content-type') || '';
     const isJsonResponse = contentType.includes('application/json');
     const payload = isJsonResponse ? await response.json().catch(() => null) : null;
+    return { response, isJsonResponse, payload, crossOrigin };
+  };
+
+  try {
+    let attempt = await postToAiEndpoint(endpointUrl, isCrossOrigin);
+
+    // Safety net: if a relative same-origin host returned non-JSON (e.g. SPA HTML 200 on a static/WebView host),
+    // automatically retry once against the Vercel serverless AI endpoint before falling back to offline OCR.
+    if (!attempt.isJsonResponse && !attempt.crossOrigin) {
+      const vercelFallbackUrl = `${DEFAULT_VERCEL_SCAN_ORIGIN.replace(/\/+$/, '')}/api/scan-document`;
+      attempt = await postToAiEndpoint(vercelFallbackUrl, true);
+    }
+
+    const { response, isJsonResponse, payload, crossOrigin } = attempt;
 
     if (response.ok && payload?.ok && payload.data) {
       const aiData = payload.data as Omit<ScannedDocumentResult, 'engine' | 'agencySuggestions'>;
@@ -1055,9 +1080,10 @@ export async function scanDocumentImage(
     }
 
     const rawErrMsg = String(payload?.error || '');
-    const isAuthGateOrNonJsonCrossOrigin = isCrossOrigin && (!isJsonResponse || response.status === 401);
+    const isAuthGateOrNonJsonCrossOrigin = crossOrigin && (!isJsonResponse || response.status === 401);
     const isTransientUnavailable =
       isAuthGateOrNonJsonCrossOrigin ||
+      !isJsonResponse ||
       [404, 405, 502, 503, 504].includes(response.status) ||
       /\b503\b|UNAVAILABLE|high demand/i.test(rawErrMsg);
 

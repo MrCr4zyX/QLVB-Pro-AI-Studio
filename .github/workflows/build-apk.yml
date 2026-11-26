@@ -50,7 +50,10 @@ jobs:
           VITE_SCAN_API_URL: ${{ secrets.VITE_SCAN_API_URL }}
         run: |
           npm run build
-          rm -rf dist/*.apk dist/*.zip dist/*.idsig dist/assets/aistudio
+          rm -rf dist/*.apk dist/*.zip dist/*.idsig dist/assets/aistudio \
+            dist/pwa-192x192.png dist/pwa-512x512.png dist/pwa-maskable-512x512.png \
+            dist/apple-touch-icon.png dist/sw.js dist/workbox-*.js dist/sw-notification.js \
+            dist/manifest.webmanifest
 
       # 8. Tao cau hinh Capacitor neu chua co
       - name: Configure Capacitor
@@ -96,9 +99,73 @@ jobs:
           fi
 
           if [ -f android/app/build.gradle ]; then
-            sed -i 's/versionCode [0-9]\+/versionCode 202/g' android/app/build.gradle
-            sed -i 's/versionName "[^"]*"/versionName "20.2"/g' android/app/build.gradle
+            sed -i 's/versionCode [0-9]\+/versionCode 203/g' android/app/build.gradle
+            sed -i 's/versionName "[^"]*"/versionName "20.3"/g' android/app/build.gradle
           fi
+
+          # Toi uu dung luong APK: bat R8 minify + shrinkResources + giu ngon ngu vi/en + loai bo metadata thua
+          python3 - <<'GRADLE_PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          gradle_path = Path("android/app/build.gradle")
+          if gradle_path.exists():
+              text = gradle_path.read_text(encoding="utf-8")
+
+              if "resourceConfigurations" not in text:
+                  text = re.sub(
+                      r'(versionName\s+"[^"]*")',
+                      r'\1\n        resourceConfigurations += ["vi", "en"]',
+                      text,
+                      count=1,
+                  )
+
+              if "shrinkResources" not in text:
+                  text = re.sub(
+                      r'minifyEnabled\s+false',
+                      'minifyEnabled true\n            shrinkResources true\n            signingConfig signingConfigs.debug',
+                      text,
+                      count=1,
+                  )
+
+              text = text.replace(
+                  "getDefaultProguardFile('proguard-android.txt')",
+                  "getDefaultProguardFile('proguard-android-optimize.txt')",
+              )
+
+              if "DebugProbesKt.bin" not in text:
+                  text = re.sub(
+                      r'(\n\s*buildTypes\s*\{)',
+                      "\n    packaging {\n        resources {\n            excludes += [\n                'META-INF/LICENSE*',\n                'META-INF/NOTICE*',\n                'META-INF/*.kotlin_module',\n                'kotlin/**',\n                'DebugProbesKt.bin'\n            ]\n        }\n    }\\1",
+                      text,
+                      count=1,
+                  )
+
+              gradle_path.write_text(text, encoding="utf-8")
+              print("Patched android/app/build.gradle for optimized R8 release APK")
+
+              proguard_path = Path("android/app/proguard-rules.pro")
+              proguard_rules = textwrap.dedent("""\
+                  # Keep K02 WebView Bridge & MainActivity
+                  -keep class com.k02.qlvbpro.** { *; }
+                  -keepclassmembers class * {
+                      @android.webkit.JavascriptInterface <methods>;
+                  }
+
+                  # Keep Capacitor core & plugins
+                  -keep class com.getcapacitor.** { *; }
+                  -keep class com.capacitorjs.** { *; }
+                  -keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
+                  -keepclassmembers class * {
+                      @com.getcapacitor.PluginMethod <methods>;
+                  }
+                  -keep class org.apache.cordova.** { *; }
+                  -dontwarn **
+              """)
+              proguard_path.write_text(proguard_rules, encoding="utf-8")
+              print("Wrote android/app/proguard-rules.pro")
+          GRADLE_PY
 
           # Dam bao AndroidManifest.xml co day du quyen thong bao Status Bar & luu file Download/QLVB_PRO
           python3 - <<'PY'
@@ -553,7 +620,28 @@ jobs:
 
                   print("Updated splash theme:", file)
 
-          print("K02 Android 13 resources updated")
+          # F. Toi uu dung luong tai nguyen anh: xoa cac splash PNG da do phan giai khong dung (~8-10 MB) va nen PNG icon
+          removed_splash = 0
+          for splash_file in list(RES.glob("drawable-*/splash.png")):
+              splash_file.unlink(missing_ok=True)
+              removed_splash += 1
+
+          fallback_splash = RES / "drawable" / "splash.png"
+          if fallback_splash.exists():
+              Image.new("RGB", (1, 1), (255, 255, 255)).save(fallback_splash, format="PNG", optimize=True)
+
+          compressed_icons = 0
+          for icon_file in list(RES.glob("mipmap-*/ic_launcher*.png")):
+              try:
+                  with Image.open(icon_file) as im:
+                      rgba = im.convert("RGBA")
+                      quantized = rgba.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
+                      quantized.save(icon_file, format="PNG", optimize=True)
+                      compressed_icons += 1
+              except Exception as exc:
+                  print("Skip icon compression:", icon_file, exc)
+
+          print(f"K02 Android 13 resources updated (removed {removed_splash} unused splash PNGs, compressed {compressed_icons} icons)")
           PY
 
       # 13. Kiem tra theme va tai nguyen
@@ -596,22 +684,23 @@ jobs:
             echo "sdk.dir=$ANDROID_HOME" > android/local.properties
           fi
 
-      # 16. Build Debug APK
-      - name: Build Debug APK
+      # 16. Build Optimized Release APK (nen R8 + shrinkResources + ky debug tu dong)
+      - name: Build Optimized APK
         working-directory: android
         shell: bash
         run: |
-          ./gradlew assembleDebug \
+          ./gradlew assembleRelease \
             --no-daemon \
             --stacktrace
 
-      # 17. Doi ten APK
+      # 17. Doi ten APK va in dung luong
       - name: Rename APK
         shell: bash
         run: |
-          cp \
-            android/app/build/outputs/apk/debug/app-debug.apk \
-            "K02-QLVB-PRO-${GITHUB_RUN_NUMBER}.apk"
+          APK_SRC="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK_SRC" || APK_SRC="android/app/build/outputs/apk/debug/app-debug.apk"
+          cp "$APK_SRC" "K02-QLVB-PRO-${GITHUB_RUN_NUMBER}.apk"
+          ls -lh "K02-QLVB-PRO-${GITHUB_RUN_NUMBER}.apk"
 
       # 18. Upload APK
       - name: Upload APK
