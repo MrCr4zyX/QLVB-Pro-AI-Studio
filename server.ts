@@ -58,7 +58,18 @@ async function startServer() {
     }
   });
 
-  // AI Document OCR Scanner endpoint (server-side Gemini API)
+  // AI Document OCR Scanner endpoint (server-side Gemini API) with CORS for GitHub Pages PWA & APK
+  app.use('/api/scan-document', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
   app.post('/api/scan-document', async (req, res) => {
     try {
       const { imageBase64, mimeType, documentTypes, workFields } = req.body || {};

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { X, AlertTriangle, Plus, Trash2, Calendar, Shield, Save, ChevronDown, FolderOpen, FileText, Folder, Camera, ImagePlus, Loader2, CheckCircle2, Sparkles } from 'lucide-react';
+import { X, AlertTriangle, Plus, Trash2, Calendar, Shield, Save, ChevronDown, FolderOpen, FileText, Folder, Camera, ImagePlus, Loader2, CheckCircle2, Sparkles, WifiOff } from 'lucide-react';
 import {
   Document,
   Schedule,
@@ -10,7 +10,7 @@ import {
 } from '../types';
 import { displayDate, parseDateInput, parseFlexibleDate, searchKey, formatDateInputMask } from '../utils/dateUtils';
 import { ATTACHMENT_PREFIX, getAttachment, saveAttachment, openAttachment, chooseAttachmentFolder } from '../services/attachmentService';
-import { prepareImageForScan, scanDocumentImage } from '../utils/documentScanner';
+import { prepareImageForScan, scanDocumentImage, ScanMode, ScanEngine } from '../utils/documentScanner';
 
 interface DocumentModalProps {
   isOpen: boolean;
@@ -132,12 +132,16 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [duplicateList, setDuplicateList] = useState<Document[]>([]);
   const [pendingSavePayload, setPendingSavePayload] = useState<any>(null);
 
-  // AI Document Scan state
+  // AI + Offline OCR Document Scan state
   const [scanMenuOpen, setScanMenuOpen] = useState(false);
+  const [scanMode, setScanMode] = useState<ScanMode>('auto');
   const [scanLoading, setScanLoading] = useState(false);
+  const [scanStatusText, setScanStatusText] = useState('Đang chuẩn bị hình ảnh...');
   const [scanPreviewUrl, setScanPreviewUrl] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanSuccessMsg, setScanSuccessMsg] = useState<string | null>(null);
+  const [scanEngineUsed, setScanEngineUsed] = useState<ScanEngine | null>(null);
+  const [scanFallbackNotice, setScanFallbackNotice] = useState<string | null>(null);
   const [highlightedFields, setHighlightedFields] = useState<Record<string, boolean>>({});
   const [webcamOpen, setWebcamOpen] = useState(false);
   const [webcamError, setWebcamError] = useState<string | null>(null);
@@ -298,9 +302,12 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       setWebcamError(null);
       setScanMenuOpen(false);
       setScanLoading(false);
+      setScanStatusText('Đang chuẩn bị hình ảnh...');
       setScanPreviewUrl(null);
       setScanError(null);
       setScanSuccessMsg(null);
+      setScanEngineUsed(null);
+      setScanFallbackNotice(null);
       setHighlightedFields({});
       if (highlightTimerRef.current) {
         window.clearTimeout(highlightTimerRef.current);
@@ -338,6 +345,9 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       setScanMenuOpen(false);
       setScanError(null);
       setScanSuccessMsg(null);
+      setScanEngineUsed(null);
+      setScanFallbackNotice(null);
+      setScanStatusText('Đang tối ưu hình ảnh...');
       setScanLoading(true);
 
       scanAbortRef.current?.abort();
@@ -353,7 +363,15 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
           prepared,
           documentTypes.map((t) => t.name),
           workFields.map((f) => f.name),
-          controller.signal
+          {
+            mode: scanMode,
+            signal: controller.signal,
+            onProgress: (text) => {
+              if (!controller.signal.aborted) {
+                setScanStatusText(text);
+              }
+            },
+          }
         );
         if (controller.signal.aborted) return;
 
@@ -436,11 +454,17 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
           highlightTimerRef.current = window.setTimeout(() => {
             setHighlightedFields({});
           }, 3200);
+          setScanEngineUsed(result.engine);
+          setScanFallbackNotice(result.fallbackNotice || null);
           setScanSuccessMsg(
-            `Đã quét & tự điền: ${filledLabels.join(', ')}. Vui lòng kiểm tra lại trước khi lưu.`
+            `Đã tự điền: ${filledLabels.join(', ')}. Vui lòng kiểm tra lại trước khi lưu.`
           );
         } else {
-          setScanError('Không đọc được thông tin rõ ràng từ ảnh. Vui lòng chụp cận cảnh phần đầu văn bản hơn.');
+          setScanError(
+            result.engine === 'offline'
+              ? 'OCR trên máy chưa đọc được thông tin rõ ràng. Hãy chụp thẳng, đủ sáng và cận phần đầu văn bản hơn.'
+              : 'Không đọc được thông tin rõ ràng từ ảnh. Vui lòng chụp cận cảnh phần đầu văn bản hơn.'
+          );
         }
       } catch (err: any) {
         if (err?.name === 'AbortError' || controller.signal.aborted) return;
@@ -453,7 +477,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         if (galleryInputRef.current) galleryInputRef.current.value = '';
       }
     },
-    [documentTypes, workFields]
+    [documentTypes, workFields, scanMode]
   );
 
   // Support Ctrl+V image paste while modal is open
@@ -813,8 +837,38 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                     </span>
                   </button>
 
-                  <div className="mt-1.5 pt-1.5 border-t border-slate-100 px-2 pb-0.5 text-[10px] text-slate-500 leading-snug">
-                    Hỗ trợ dán ảnh nhanh (<span className="font-semibold text-slate-600">Ctrl+V</span>). Chỉ quét văn bản độ mật <span className="font-semibold text-slate-600">Thường</span>.
+                  <div className="mt-1.5 pt-1.5 border-t border-slate-100 px-1.5 pb-1 space-y-1.5">
+                    <div className="grid grid-cols-2 gap-1 bg-slate-100 p-0.5 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setScanMode('auto')}
+                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition flex items-center justify-center gap-1 ${
+                          scanMode === 'auto'
+                            ? 'bg-white text-blue-700 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-800'
+                        }`}
+                      >
+                        <Sparkles className="w-3 h-3 shrink-0" />
+                        <span>Tự động AI</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setScanMode('offline')}
+                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition flex items-center justify-center gap-1 ${
+                          scanMode === 'offline'
+                            ? 'bg-white text-amber-700 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-800'
+                        }`}
+                      >
+                        <WifiOff className="w-3 h-3 shrink-0" />
+                        <span>OCR trên máy</span>
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-snug px-0.5">
+                      {scanMode === 'auto'
+                        ? 'Ưu tiên AI khi có mạng, tự động chuyển OCR trên máy khi offline. Hỗ trợ Ctrl+V.'
+                        : 'Chạy OCR trực tiếp trên thiết bị, không gửi ảnh ra mạng (lần đầu tải gói tiếng Việt).'}
+                    </p>
                   </div>
                 </div>
               )}
@@ -830,7 +884,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
           </div>
         </div>
 
-        {/* Compact AI Scan Progress / Feedback Banner */}
+        {/* Compact AI / Offline OCR Scan Progress & Feedback Banner */}
         {scanLoading && (
           <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-200 flex items-center gap-3 shrink-0">
             <div className="relative w-10 h-12 rounded-lg overflow-hidden bg-slate-900 border border-indigo-300 shrink-0 shadow-xs">
@@ -846,10 +900,10 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900">
                 <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span>AI đang nhận diện văn bản...</span>
+                <span>{scanMode === 'offline' ? 'Đang quét OCR trên máy...' : 'Đang nhận diện văn bản...'}</span>
               </div>
-              <p className="text-[11px] text-indigo-700/80 truncate">
-                Đang bóc tách số văn bản, ký hiệu, ngày ban hành, trích yếu nội dung
+              <p className="text-[11px] text-indigo-700/90 truncate">
+                {scanStatusText}
               </p>
             </div>
             <button
@@ -863,13 +917,46 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         )}
 
         {!scanLoading && scanSuccessMsg && (
-          <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-200 flex items-center gap-2 text-emerald-800 shrink-0">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span className="text-[11px] font-medium flex-1 leading-snug">{scanSuccessMsg}</span>
+          <div
+            className={`px-4 py-2 border-b flex items-start gap-2 shrink-0 ${
+              scanEngineUsed === 'offline'
+                ? 'bg-amber-50 border-amber-200 text-amber-900'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            }`}
+          >
+            <CheckCircle2
+              className={`w-4 h-4 shrink-0 mt-0.5 ${
+                scanEngineUsed === 'offline' ? 'text-amber-600' : 'text-emerald-600'
+              }`}
+            />
+            <div className="flex-1 min-w-0 space-y-0.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span
+                  className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    scanEngineUsed === 'offline'
+                      ? 'bg-amber-200/80 text-amber-900'
+                      : 'bg-emerald-200/80 text-emerald-900'
+                  }`}
+                >
+                  {scanEngineUsed === 'offline' ? 'OCR trên máy' : 'AI trực tuyến'}
+                </span>
+                <span className="text-[11px] font-medium leading-snug">{scanSuccessMsg}</span>
+              </div>
+              {scanFallbackNotice && (
+                <p className="text-[10px] opacity-80 leading-snug">{scanFallbackNotice}</p>
+              )}
+            </div>
             <button
               type="button"
-              onClick={() => setScanSuccessMsg(null)}
-              className="p-0.5 rounded hover:bg-emerald-100 text-emerald-600"
+              onClick={() => {
+                setScanSuccessMsg(null);
+                setScanFallbackNotice(null);
+              }}
+              className={`p-0.5 rounded ${
+                scanEngineUsed === 'offline'
+                  ? 'hover:bg-amber-100 text-amber-700'
+                  : 'hover:bg-emerald-100 text-emerald-600'
+              }`}
               aria-label="Đóng thông báo"
             >
               <X className="w-3.5 h-3.5" />

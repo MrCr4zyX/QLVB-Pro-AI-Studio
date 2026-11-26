@@ -36,6 +36,7 @@ jobs:
       - name: Build PWA
         env:
           GITHUB_PAGES: 'true'
+          VITE_SCAN_API_URL: ${{ secrets.VITE_SCAN_API_URL }}
         run: npm run build
 
       - name: Upload Pages artifact
