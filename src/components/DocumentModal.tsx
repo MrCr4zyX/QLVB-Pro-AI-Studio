@@ -142,6 +142,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [scanSuccessMsg, setScanSuccessMsg] = useState<string | null>(null);
   const [scanEngineUsed, setScanEngineUsed] = useState<ScanEngine | null>(null);
   const [scanFallbackNotice, setScanFallbackNotice] = useState<string | null>(null);
+  const [scanAgencySuggestions, setScanAgencySuggestions] = useState<string[]>([]);
   const [highlightedFields, setHighlightedFields] = useState<Record<string, boolean>>({});
   const [webcamOpen, setWebcamOpen] = useState(false);
   const [webcamError, setWebcamError] = useState<string | null>(null);
@@ -308,6 +309,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       setScanSuccessMsg(null);
       setScanEngineUsed(null);
       setScanFallbackNotice(null);
+      setScanAgencySuggestions([]);
       setHighlightedFields({});
       if (highlightTimerRef.current) {
         window.clearTimeout(highlightTimerRef.current);
@@ -347,6 +349,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       setScanSuccessMsg(null);
       setScanEngineUsed(null);
       setScanFallbackNotice(null);
+      setScanAgencySuggestions([]);
       setScanStatusText('Đang tối ưu hình ảnh...');
       setScanLoading(true);
 
@@ -359,6 +362,10 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         if (controller.signal.aborted) return;
         setScanPreviewUrl(prepared.previewUrl);
 
+        const symbolAgencyHints = allDocuments
+          .filter((d) => (d.symbol || '').trim() && (d.agency || '').trim())
+          .map((d) => ({ symbol: d.symbol.trim(), agency: d.agency.trim() }));
+
         const result = await scanDocumentImage(
           prepared,
           documentTypes.map((t) => t.name),
@@ -366,6 +373,8 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
           {
             mode: scanMode,
             signal: controller.signal,
+            knownAgencies: agencyHistory,
+            symbolAgencyHints,
             onProgress: (text) => {
               if (!controller.signal.aborted) {
                 setScanStatusText(text);
@@ -404,11 +413,14 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
           newlyHighlighted.symbol = true;
         }
 
-        // 3. Cơ quan ký
+        // 3. Cơ quan ký & danh sách đề xuất khớp từ danh mục có sẵn
         if (result.agency) {
           setAgency(result.agency);
           filledLabels.push('Cơ quan ký');
           newlyHighlighted.agency = true;
+        }
+        if (Array.isArray(result.agencySuggestions) && result.agencySuggestions.length > 0) {
+          setScanAgencySuggestions(result.agencySuggestions);
         }
 
         // 4. Loại văn bản
@@ -477,7 +489,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         if (galleryInputRef.current) galleryInputRef.current.value = '';
       }
     },
-    [documentTypes, workFields, scanMode]
+    [documentTypes, workFields, scanMode, agencyHistory, allDocuments]
   );
 
   // Support Ctrl+V image paste while modal is open
@@ -1052,6 +1064,28 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 Cơ quan ký *
               </label>
               <HistoryCombo value={agency} onChange={setAgency} options={agencyHistory} placeholder="Bộ Công an" required />
+              {scanAgencySuggestions.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  <span className="text-[10px] font-semibold text-slate-500">Đề xuất:</span>
+                  {scanAgencySuggestions.map((item) => {
+                    const isActive = searchKey(agency) === searchKey(item);
+                    return (
+                      <button
+                        type="button"
+                        key={item}
+                        onClick={() => setAgency(item)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold transition border ${
+                          isActive
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-blue-50/70 text-blue-800 border-blue-200 hover:bg-blue-100'
+                        }`}
+                      >
+                        {item}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             <div>

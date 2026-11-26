@@ -60,7 +60,13 @@ async function startServer() {
 
   // AI Document OCR Scanner endpoint (server-side Gemini API) with CORS for GitHub Pages PWA & APK
   app.use('/api/scan-document', (req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') {
@@ -69,6 +75,7 @@ async function startServer() {
     }
     next();
   });
+  app.use('/api/scan-document', express.text({ type: 'text/plain', limit: '50mb' }));
 
   app.post('/api/scan-document', async (req, res) => {
     const extractErrorStatus = (err: any): number | undefined => {
@@ -89,7 +96,19 @@ async function startServer() {
     };
 
     try {
-      const { imageBase64, mimeType, documentTypes, workFields } = req.body || {};
+      let bodyObj: Record<string, any> = {};
+      if (typeof req.body === 'string' && req.body.trim()) {
+        try {
+          bodyObj = JSON.parse(req.body);
+        } catch {
+          res.status(400).json({ ok: false, error: 'Dữ liệu JSON gửi lên không hợp lệ.' });
+          return;
+        }
+      } else if (req.body && typeof req.body === 'object') {
+        bodyObj = req.body;
+      }
+
+      const { imageBase64, mimeType, documentTypes, workFields, knownAgencies } = bodyObj;
 
       if (typeof imageBase64 !== 'string' || !imageBase64.trim()) {
         res.status(400).json({ ok: false, error: 'Thiếu dữ liệu hình ảnh để quét.' });
@@ -141,13 +160,19 @@ async function startServer() {
         ? workFields.map((f) => String(f).trim()).filter(Boolean)
         : [];
 
+      const validAgencies = Array.isArray(knownAgencies)
+        ? knownAgencies.map((a) => String(a).trim()).filter(Boolean).slice(0, 80)
+        : [];
+
       const prompt = [
         'Bạn là chuyên gia số hóa văn bản hành chính Việt Nam (đặc biệt là văn bản khối Công an nhân dân, cơ quan nhà nước theo Nghị định 30/2020/NĐ-CP).',
         'Hãy đọc thật chính xác hình ảnh trang văn bản đính kèm (bố cục 2 cột đầu trang: trái là cơ quan ban hành, số/ký hiệu và trích yếu V/v; phải là Quốc hiệu và địa danh, ngày tháng năm) và trích xuất sang JSON:',
-        '1. issued: Ngày ban hành ở góc trên bên phải (ví dụ "Đắk Lắk, ngày17 tháng 11 năm 2026" hoặc "Hà Nội, ngày 15 tháng 3 năm 2026", kể cả khi viết dính "ngày17") -> chuẩn hóa thành chuỗi DD/MM/YYYY (ví dụ "17/11/2026"). Nếu không thấy rõ để chuỗi rỗng "".',
+        '1. issued: CHỈ lấy ngày ban hành của CHÍNH VĂN BẢN NÀY nằm ở góc trên bên phải ngay dưới dòng "Độc lập - Tự do - Hạnh phúc" (ví dụ "Đắk Lắk, ngày17 tháng 11 năm 2026" -> "17/11/2026", kể cả khi viết dính "ngày17"). TUYỆT ĐỐI KHÔNG lấy ngày trích dẫn trong đoạn "Căn cứ Thông tư/Nghị định... ngày ..." ở thân văn bản, KHÔNG lấy ngày hạn báo cáo ("trước ngày...") và KHÔNG lấy dấu giờ chụp ảnh ở góc ảnh. Nếu không thấy rõ ngày ở góc trên bên phải để chuỗi rỗng "".',
         '2. number: Phần SỐ văn bản đứng trước dấu gạch chéo "/" trong dòng "Số: ...". Ví dụ "Số:2797 /E07-CT" -> "2797"; "Số: 08/HD-CAT-PX01" -> "08". Không gồm chữ "Số:" và không có khoảng trắng thừa.',
         '3. symbol: Phần KÝ HIỆU văn bản đứng sau dấu gạch chéo "/". Ví dụ "Số:2797 /E07-CT" -> "E07-CT"; "Số: 1910/KH-E07-CT" -> "KH-E07-CT".',
-        '4. agency: Cơ quan ban hành văn bản ở góc trên bên trái. Nếu có 2 dòng (dòng trên là cơ quan chủ quản như "BỘ TƯ LỆNH CẢNH SÁT CƠ ĐỘNG", dòng dưới in đậm có gạch chân là cơ quan trực tiếp ban hành như "TRUNG ĐOÀN CSCĐ SỐ 7"), ưu tiên lấy cơ quan trực tiếp ban hành (dòng dưới). Viết chuẩn chữ hoa chữ thường tiếng Việt tự nhiên (ví dụ "Trung đoàn CSCĐ số 7", "Bộ Công an"), giữ nguyên viết tắt như CSCĐ, K02, BCA, UBND.',
+        validAgencies.length > 0
+          ? `4. agency: Cơ quan ban hành văn bản ở góc trên bên trái (nếu có 2 dòng thì ưu tiên dòng dưới in đậm trực tiếp ban hành). Ưu tiên khớp CHÍNH XÁC tên trong danh sách cơ quan có sẵn sau nếu cùng đơn vị: [${validAgencies.join(', ')}]. Nếu là cơ quan mới chưa có trong danh sách thì viết chuẩn tiếng Việt tự nhiên (ví dụ "Trung đoàn CSCĐ số 7", "Bộ Công an").`
+          : '4. agency: Cơ quan ban hành văn bản ở góc trên bên trái. Nếu có 2 dòng (dòng trên là cơ quan chủ quản như "BỘ TƯ LỆNH CẢNH SÁT CƠ ĐỘNG", dòng dưới in đậm có gạch chân là cơ quan trực tiếp ban hành như "TRUNG ĐOÀN CSCĐ SỐ 7"), ưu tiên lấy cơ quan trực tiếp ban hành (dòng dưới). Viết chuẩn chữ hoa chữ thường tiếng Việt tự nhiên (ví dụ "Trung đoàn CSCĐ số 7", "Bộ Công an"), giữ nguyên viết tắt như CSCĐ, K02, BCA, UBND.',
         `5. documentType: Chọn ĐÚNG 1 tên loại văn bản khớp nhất trong danh sách sau: [${validTypes.join(', ')}]. LƯU Ý QUAN TRỌNG: Công văn theo Nghị định 30 KHÔNG có tiêu đề tên loại ở giữa và ký hiệu thường KHÔNG có chữ "CV-" (ví dụ "Số: 2797/E07-CT" kèm dòng "V/v ..." ngay bên dưới và "Kính gửi:") -> loại văn bản là "Công văn". Các loại khác suy luận từ tiêu đề (KẾ HOẠCH, QUYẾT ĐỊNH, QUY ĐỊNH, HƯỚNG DẪN, CHỈ THỊ, THÔNG TƯ...) hoặc ký hiệu (KH -> Kế hoạch, QĐ -> Quyết định, QĐi -> Quy định, HD -> Hướng dẫn, CT -> Chỉ thị, TT -> Thông tư, NQ -> Nghị quyết, NĐ -> Nghị định).`,
         '6. summary: Trích yếu nội dung văn bản đầy đủ, chính xác dấu tiếng Việt. Với Công văn lấy đầy đủ nội dung sau "V/v" ở ngay bên dưới dòng "Số:" cho đến trước "Kính gửi:" (ví dụ "V/v cấp thẻ BHYT đối với Lao động hợp đồng và thân nhân cán bộ, chiến sĩ năm 2027"). Với Kế hoạch/Quyết định/Hướng dẫn/Chỉ thị/Quy định lấy tên loại văn bản + nội dung trích yếu ngay bên dưới tiêu đề. Viết chữ hoa đầu câu tự nhiên.',
         validFields.length > 0

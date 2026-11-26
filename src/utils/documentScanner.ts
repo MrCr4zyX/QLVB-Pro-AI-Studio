@@ -1,13 +1,20 @@
 import { searchKey } from './dateUtils';
+import { OAUTH_REDIRECT_ORIGIN } from '../services/googleDriveService';
 
 export type ScanEngine = 'ai' | 'offline';
 export type ScanMode = 'auto' | 'offline';
+
+export interface SymbolAgencyHint {
+  symbol: string;
+  agency: string;
+}
 
 export interface ScannedDocumentResult {
   issued: string;
   number: string;
   symbol: string;
   agency: string;
+  agencySuggestions: string[];
   documentType: string;
   summary: string;
   workFields: string[];
@@ -25,21 +32,29 @@ export interface ScanOptions {
   mode?: ScanMode;
   signal?: AbortSignal;
   onProgress?: (statusText: string) => void;
+  knownAgencies?: string[];
+  symbolAgencyHints?: SymbolAgencyHint[];
 }
 
 const MAX_DIMENSION = 1600;
 const JPEG_QUALITY = 0.86;
 
 /**
- * Resolves the AI scan endpoint URL, supporting VITE_SCAN_API_URL for GitHub Pages PWA / APK.
- * Returns null when running on static-only hosts (GitHub Pages / Capacitor APK) without VITE_SCAN_API_URL.
+ * Resolves the AI scan endpoint URL:
+ * 1) Uses VITE_SCAN_API_URL if configured.
+ * 2) On static hosts (GitHub Pages PWA / Capacitor APK), defaults to the app's Cloud Run backend (OAUTH_REDIRECT_ORIGIN/api/scan-document)
+ *    so AI Online is ALWAYS prioritized when internet is available.
+ * 3) On full-stack hosts (.run.app / localhost), uses relative /api/scan-document.
  */
-export function resolveAiScanEndpoint(): string | null {
+export function resolveAiScanEndpoint(): { url: string; isCrossOrigin: boolean } {
   const configured = String(import.meta.env.VITE_SCAN_API_URL || '').trim().replace(/\/+$/, '');
   if (configured) {
-    return configured.endsWith('/api/scan-document')
+    const url = configured.endsWith('/api/scan-document')
       ? configured
       : `${configured}/api/scan-document`;
+    const isCrossOrigin =
+      typeof window !== 'undefined' ? !url.startsWith(window.location.origin) && url.startsWith('http') : false;
+    return { url, isCrossOrigin };
   }
 
   if (typeof window !== 'undefined') {
@@ -49,11 +64,12 @@ export function resolveAiScanEndpoint(): string | null {
       protocol === 'capacitor:' ||
       protocol === 'file:';
     if (isStaticOnlyHost) {
-      return null;
+      const base = OAUTH_REDIRECT_ORIGIN.replace(/\/+$/, '');
+      return { url: `${base}/api/scan-document`, isCrossOrigin: true };
     }
   }
 
-  return '/api/scan-document';
+  return { url: '/api/scan-document', isCrossOrigin: false };
 }
 
 /**
@@ -130,15 +146,14 @@ interface PreprocessedRegions {
 
 /**
  * Local adaptive shadow-removal + contrast normalization for phone camera photos of paper documents.
- * Splits the 2-column Vietnamese administrative header into clean left (Agency, Số, V/v) and right (Quốc hiệu, Ngày) crops
- * so Tesseract does not mix left and right columns together.
+ * Strictly isolates the top header band (excluding body citations like "Căn cứ ... ngày 15/9/2025" and camera watermarks)
+ * into clean Left (Agency, Số, V/v) and Right (Quốc hiệu, Địa danh ngày tháng năm) crops.
  */
 async function preprocessRegionsForOfflineOcr(previewUrl: string): Promise<PreprocessedRegions> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       try {
-        // Upscale small photos slightly so Vietnamese diacritics are sharp for Tesseract
         const minTargetWidth = 1400;
         const maxTargetWidth = 2000;
         let width = img.naturalWidth;
@@ -195,10 +210,8 @@ async function preprocessRegionsForOfflineOcr(previewUrl: string): Promise<Prepr
               36,
               0.299 * bgPixels[i] + 0.587 * bgPixels[i + 1] + 0.114 * bgPixels[i + 2]
             );
-            // Flatten uneven shadow illumination so shadowed paper becomes clean white
             val = Math.min(255, (gray / bgGray) * 246);
           }
-          // Soft contrast stretch: whiten paper (>224) and sharpen dark ink (<170)
           let enhanced: number;
           if (val >= 224) {
             enhanced = 255;
@@ -216,14 +229,18 @@ async function preprocessRegionsForOfflineOcr(previewUrl: string): Promise<Prepr
 
         const fullUrl = canvas.toDataURL('image/png');
 
-        // Crop header area (for wide header shots use full height; for full A4 portrait use top 55%)
-        const isPortraitFullPage = height > width * 1.1;
-        const headerHeight = isPortraitFullPage ? Math.round(height * 0.52) : height;
+        // Determine header crop height based on aspect ratio:
+        // - Ultra-wide cropped header strip (aspect > 2.2): keep full height
+        // - Landscape document photo (aspect 1.1..2.2, e.g. 16:9): top 56% covers Agency/Số/V/v/Date and cuts out "Căn cứ..." body & bottom timestamp!
+        // - Portrait full A4 page (aspect < 1.1): top 46% covers the full header block
+        const aspect = width / Math.max(1, height);
+        const headerHeightRatio = aspect > 2.2 ? 1.0 : aspect >= 1.1 ? 0.56 : 0.46;
+        const headerHeight = Math.round(height * headerHeightRatio);
 
         const cropRegion = (xRatio: number, wRatio: number, hPx: number): string => {
           const sx = Math.round(width * xRatio);
           const sw = Math.round(width * wRatio);
-          const pad = 20;
+          const pad = 24;
           const c = document.createElement('canvas');
           c.width = sw + pad * 2;
           c.height = hPx + pad * 2;
@@ -235,10 +252,10 @@ async function preprocessRegionsForOfflineOcr(previewUrl: string): Promise<Prepr
           return c.toDataURL('image/png');
         };
 
-        // Left column (0% -> 54%): Agency, Số/Ký hiệu, V/v trích yếu
-        const leftHeaderUrl = cropRegion(0, 0.54, headerHeight);
-        // Right column (46% -> 100%): Quốc hiệu, Địa danh ngày tháng năm
-        const rightHeaderUrl = cropRegion(0.46, 0.54, headerHeight);
+        // Left header column (0% -> 55%): Agency, Số/Ký hiệu, V/v trích yếu
+        const leftHeaderUrl = cropRegion(0, 0.55, headerHeight);
+        // Right header column (45% -> 99%): Quốc hiệu, Địa danh ngày tháng năm (strictly top header band!)
+        const rightHeaderUrl = cropRegion(0.45, 0.54, headerHeight);
 
         resolve({ fullUrl, leftHeaderUrl, rightHeaderUrl });
       } catch {
@@ -272,6 +289,7 @@ function normalizeVietnameseTitle(raw: string): string {
   return words
     .map((word, idx) => {
       const bare = word.replace(/[^A-Za-zÀ-ỹ0-9]/g, '').toUpperCase();
+      if (bare === 'CSCD') return word.replace(/CSCD/i, 'CSCĐ');
       if (PRESERVED_ACRONYMS.has(bare) || /^[A-Z]\d{2}$/.test(bare) || /^[A-Z]{2}\d{2}$/.test(bare)) {
         return word.toUpperCase();
       }
@@ -291,21 +309,182 @@ function normalizeAgencyName(raw: string): string {
     .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned) return '';
-  const words = cleaned.split(' ');
-  const minorWords = new Set([
-    'của', 'và', 'về', 'tại', 'số', 'tỉnh', 'thành', 'phố', 'huyện', 'quận', 'xã', 'phường', 'khu', 'vực',
+
+  // Fix common Vietnamese administrative capitalization & OCR typos (e.g., CSCD -> CSCĐ, Trung Đoàn -> Trung đoàn)
+  const lowerKeepWords = new Set([
+    'của', 'và', 'về', 'tại', 'số', 'tỉnh', 'thành', 'phố', 'huyện', 'quận', 'xã', 'phường',
+    'khu', 'vực', 'đoàn', 'lệnh', 'sát', 'cơ', 'động', 'nhân', 'dân', 'ban', 'an',
   ]);
-  return words
+
+  const words = cleaned.split(' ');
+  const normalized = words
     .map((word, idx) => {
       const bare = word.replace(/[^A-Za-zÀ-ỹ0-9]/g, '').toUpperCase();
+      if (bare === 'CSCD') return 'CSCĐ';
       if (PRESERVED_ACRONYMS.has(bare) || /^[A-Z]{1,3}\d{2}$/.test(bare)) {
         return word.toUpperCase();
       }
       const lower = word.toLocaleLowerCase('vi-VN');
-      if (idx > 0 && minorWords.has(lower)) return lower;
+      if (idx === 0) {
+        return lower.charAt(0).toLocaleUpperCase('vi-VN') + lower.slice(1);
+      }
+      if (lowerKeepWords.has(lower)) return lower;
       return lower.charAt(0).toLocaleUpperCase('vi-VN') + lower.slice(1);
     })
     .join(' ');
+
+  return normalized
+    .replace(/\bBộ Tư lệnh\b/gi, 'Bộ Tư lệnh')
+    .replace(/\bBộ Công an\b/gi, 'Bộ Công an')
+    .replace(/\bCảnh sát cơ động\b/gi, 'Cảnh sát cơ động')
+    .replace(/\bTrung đoàn\b/gi, 'Trung đoàn')
+    .replace(/\bTiểu đoàn\b/gi, 'Tiểu đoàn')
+    .replace(/\bỦy ban nhân dân\b/gi, 'Ủy ban nhân dân')
+    .replace(/\bCSCD\b/g, 'CSCĐ');
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const dp = new Array(b.length + 1);
+  for (let j = 0; j <= b.length; j++) dp[j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const temp = dp[j];
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
+      prev = temp;
+    }
+  }
+  return dp[b.length];
+}
+
+function computeAgencySimilarity(raw: string, candidate: string): number {
+  const k1 = searchKey(raw).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const k2 = searchKey(candidate).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!k1 || !k2) return 0;
+  if (k1 === k2) return 1.0;
+
+  // Substring containment boost (e.g., "trung doan cscd so 7" inside candidate)
+  const containsScore = k1.includes(k2) || k2.includes(k1)
+    ? Math.min(k1.length, k2.length) / Math.max(k1.length, k2.length)
+    : 0;
+
+  // Token overlap (Dice coefficient with fuzzy token match for 1-char OCR typos)
+  const t1 = k1.split(' ').filter(Boolean);
+  const t2 = k2.split(' ').filter(Boolean);
+  let matchedTokens = 0;
+  for (const w1 of t1) {
+    const hasMatch = t2.some((w2) => {
+      if (w1 === w2) return true;
+      if (w1.length >= 3 && w2.length >= 3 && levenshteinDistance(w1, w2) <= 1) return true;
+      return false;
+    });
+    if (hasMatch) matchedTokens++;
+  }
+  const diceScore = (2 * matchedTokens) / Math.max(1, t1.length + t2.length);
+
+  // Character-level normalized Levenshtein similarity
+  const maxLen = Math.max(k1.length, k2.length);
+  const charScore = 1 - levenshteinDistance(k1, k2) / maxLen;
+
+  return Math.max(containsScore * 0.95, diceScore * 0.65 + charScore * 0.35);
+}
+
+function extractUnitTokensFromSymbol(symbol: string): string[] {
+  if (!symbol) return [];
+  const docTypePrefixes = new Set(['KH', 'QD', 'QDI', 'HD', 'CT', 'CV', 'TT', 'TTLT', 'NQ', 'ND', 'PL', 'BC', 'TB', 'GM', 'TTR']);
+  return searchKey(symbol)
+    .toUpperCase()
+    .split(/[-\/\s]+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 2 && !docTypePrefixes.has(p));
+}
+
+/**
+ * Matches an extracted agency string against the user's known agency catalog to eliminate OCR spelling mistakes,
+ * and produces a ranked list of quick-pick suggestions.
+ */
+function resolveAgencyWithCatalog(
+  rawAgency: string,
+  symbol: string,
+  knownAgencies: string[] = [],
+  symbolAgencyHints: SymbolAgencyHint[] = []
+): { agency: string; suggestions: string[] } {
+  const cleanedRaw = normalizeAgencyName(rawAgency);
+  const uniqueCatalog = Array.from(
+    new Set(knownAgencies.map((a) => a.trim()).filter(Boolean))
+  );
+
+  // Build frequency bonus map from previous documents sharing the same unit code in symbol (e.g., E07 -> Trung đoàn CSCĐ số 7)
+  const symbolUnitTokens = extractUnitTokensFromSymbol(symbol);
+  const symbolHintBoost = new Map<string, number>();
+  if (symbolUnitTokens.length > 0 && symbolAgencyHints.length > 0) {
+    for (const pair of symbolAgencyHints) {
+      const pairTokens = extractUnitTokensFromSymbol(pair.symbol);
+      const primaryUnit = symbolUnitTokens[0];
+      if (pairTokens.includes(primaryUnit) && pair.agency.trim()) {
+        const key = pair.agency.trim();
+        symbolHintBoost.set(key, Math.min(0.32, (symbolHintBoost.get(key) || 0) + 0.18));
+      }
+    }
+  }
+
+  if (uniqueCatalog.length === 0) {
+    return { agency: cleanedRaw, suggestions: [] };
+  }
+
+  const scored = uniqueCatalog
+    .map((candidate) => {
+      const textSim = cleanedRaw ? computeAgencySimilarity(cleanedRaw, candidate) : 0;
+      const hintBonus = symbolHintBoost.get(candidate) || 0;
+      const totalScore = Math.min(1, textSim + (textSim >= 0.35 || !cleanedRaw ? hintBonus : hintBonus * 0.5));
+      return { candidate, textSim, hintBonus, totalScore };
+    })
+    .sort((a, b) => b.totalScore - a.totalScore || b.textSim - a.textSim);
+
+  const best = scored[0];
+  let chosenAgency = cleanedRaw;
+
+  // Snap to exact known catalog entry when similarity is strong (eliminates OCR typos like "Trung Đoàn CSCD số 7" -> "Trung đoàn CSCĐ số 7")
+  if (best && (best.textSim >= 0.72 || best.totalScore >= 0.78)) {
+    chosenAgency = best.candidate;
+  } else if (!chosenAgency && best && best.hintBonus >= 0.18) {
+    // If OCR completely missed the agency text but symbol unit code strongly matches an existing unit, use it!
+    chosenAgency = best.candidate;
+  }
+
+  // Build up to 4 clean suggestions for 1-tap verification/switching
+  const suggestions: string[] = [];
+  const pushUnique = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (!suggestions.some((s) => searchKey(s) === searchKey(trimmed))) {
+      suggestions.push(trimmed);
+    }
+  };
+
+  for (const item of scored) {
+    if (suggestions.length >= 4) break;
+    if (item.totalScore >= 0.38 || item.hintBonus >= 0.18) {
+      pushUnique(item.candidate);
+    }
+  }
+
+  // If raw OCR text was genuinely different from catalog entries, include it as an option too
+  if (cleanedRaw && suggestions.length < 4) {
+    pushUnique(cleanedRaw);
+  }
+
+  return {
+    agency: chosenAgency,
+    suggestions,
+  };
 }
 
 const AGENCY_KEYWORD_PATTERNS = [
@@ -363,17 +542,49 @@ const WORK_FIELD_KEYWORDS: Array<{ field: string; patterns: RegExp[] }> = [
   { field: 'Bảo vệ nội bộ', patterns: [/bảo vệ nội bộ/i, /bảo mật/i, /bí mật nhà nước/i, /kiểm tra nội bộ/i, /kỷ luật/i, /thanh tra/i] },
 ];
 
-function extractIssuedDateFromText(text: string): string {
-  // Primary: Vietnamese administrative format (tolerant of italic OCR glitches & missing spaces like "ngày17 tháng 11 năm 2026")
-  const vnPatterns = [
-    /ng[aàáảãạăằắẳẵặâầấẩẫậeêệoôơuưyý]{1,3}y?\s*[:.,]?\s*(\d{1,2})\s*th[aàáảãạăằắẳẵặâầấẩẫậoô]{1,3}n?g?\s*(\d{1,2})\s*n[aăâàáảãạằắẳẵặầấẩẫậo]{1,3}m?\s*((?:19|20)\d{2})/i,
-    /(\d{1,2})\s*th[aàáảãạăằắẳẵặâầấẩẫậ]ng\s*(\d{1,2})\s*n[aăâàáảãạằắẳẵặầấẩẫậ]m\s*((?:19|20)\d{2})/i,
-    /,\s*ng\S{0,4}\s*(\d{1,2})\s+\S{2,6}\s+(\d{1,2})\s+\S{2,5}\s+((?:19|20)\d{2})/i,
-    /\b(\d{1,2})[\/\-](\d{1,2})[\/\-]((?:19|20)\d{2})\b/,
+const BODY_START_REGEX =
+  /^(?:k[íi]nh\s*g[ửu]i|c[ăa]n\s*c[ứu]|th[ựư]c\s*hi[ệe]n|theo\s*đ[ềe]\s*ngh[ịi]|đ[ểe]\s*đ[ảa]m\s*b[ảa]o|x[ée]t\s*đ[ềe]\s*ngh[ịi]|n[ơo]i\s*nh[ậa]n|[I1]\.\s|[ĐD]i[ềe]u\s*1\b)/i;
+
+const CITATION_OR_TIMESTAMP_LINE_REGEX =
+  /(?:c[ăa]n\s*c[ứu]|th[ôo]ng\s*t[ưư]\s*s[ốô]|ngh[ịi]\s*đ[ịi]nh\s*s[ốô]|quy[ếe]t\s*đ[ịi]nh\s*s[ốô]|k[ếe]\s*ho[ạa]ch\s*s[ốô]|c[ôo]ng\s*v[ăa]n\s*s[ốô]|tr[ưư][ớo]c\s*ng[aà]y|t[ừu]\s*ng[aà]y|đ[ếe]n\s*ng[aà]y|\b\d{1,2}:\d{2}\b)/i;
+
+/**
+ * Fixes common italic OCR digit mistakes inside date fragments (e.g. "ngàyl7", "tháng ll", "tháng 1l").
+ */
+function normalizeItalicOcrDateLine(line: string): string {
+  return line
+    .replace(/([a-zà-ỹ])([lI|])(\d)/gi, '$1 1$3')
+    .replace(/(\d)([lI|])(\s|$)/g, '$11$3')
+    .replace(/([lI|])(\d)/g, '1$2')
+    .replace(/\b[lI|]{2}\b/g, '11')
+    .replace(/(th[aàáảãạăằắẳẵặâầấẩẫậoô]{1,3}n?g?)\s*([lI|])(?=\s|$)/gi, '$1 1')
+    .replace(/(ng[aàáảãạăằắẳẵặâầấẩẫậeêoôơuưyý]{1,4}y?)(\d)/gi, '$1 $2');
+}
+
+/**
+ * Strictly extracts the document's issuing date from the HEADER section only.
+ * Never picks citation dates from "Căn cứ Thông tư số ... ngày 15/9/2025" or camera timestamps ("26/11/2026 20:15").
+ */
+function extractIssuedDateFromHeader(lines: string[]): string {
+  const headerLines: string[] = [];
+  for (const rawLine of lines) {
+    if (BODY_START_REGEX.test(rawLine)) break;
+    if (CITATION_OR_TIMESTAMP_LINE_REGEX.test(rawLine)) continue;
+    headerLines.push(normalizeItalicOcrDateLine(rawLine));
+  }
+
+  const headerText = headerLines.join('\n');
+  if (!headerText) return '';
+
+  // Priority 1: Full Vietnamese header date format ("Đắk Lắk, ngày 17 tháng 11 năm 2026" / "ngày17 tháng 11 năm 2026")
+  const vnHeaderPatterns = [
+    /ng[aàáảãạăằắẳẵặâầấẩẫậeêoôơuưyýìí]{0,4}y?\s*[:.,]?\s*(\d{1,2})\s*[,.;]?\s*th[aàáảãạăằắẳẵặâầấẩẫậoôơuư]{1,4}n?g?\s*(\d{1,2})\s*[,.;]?\s*n[aăâàáảãạằắẳẵặầấẩẫậoô]{1,4}m?\s*((?:19|20)\d{2})/i,
+    /\b(\d{1,2})\s*th[aàáảãạăằắẳẵặâầấẩẫậoô]{1,3}n?g?\s*(\d{1,2})\s*n[aăâàáảãạằắẳẵặầấẩẫậoô]{1,3}m?\s*((?:19|20)\d{2})\b/i,
+    /,\s*[a-zà-ỹ]{2,7}\s*(\d{1,2})\s+[a-zà-ỹ]{3,8}\s+(\d{1,2})\s+[a-zà-ỹ]{2,6}\s+((?:19|20)\d{2})/i,
   ];
 
-  for (const pattern of vnPatterns) {
-    const m = text.match(pattern);
+  for (const pattern of vnHeaderPatterns) {
+    const m = headerText.match(pattern);
     if (m) {
       const dd = Number(m[1]);
       const mm = Number(m[2]);
@@ -383,6 +594,21 @@ function extractIssuedDateFromText(text: string): string {
       }
     }
   }
+
+  // Priority 2: Slash/dash date ONLY if it appears on a clean header line (not inside a document code like 86/2025/TT-BCA)
+  for (const line of headerLines) {
+    if (/\/\s*[A-ZĐ]{2,}/i.test(line)) continue;
+    const m = line.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-]((?:19|20)\d{2})\b/);
+    if (m) {
+      const dd = Number(m[1]);
+      const mm = Number(m[2]);
+      const yyyy = Number(m[3]);
+      if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12 && yyyy >= 1990 && yyyy <= 2099) {
+        return `${String(dd).padStart(2, '0')}/${String(mm).padStart(2, '0')}/${yyyy}`;
+      }
+    }
+  }
+
   return '';
 }
 
@@ -395,14 +621,16 @@ function toCleanLines(raw: string): string[] {
 
 /**
  * Extracts Vietnamese administrative document metadata from multi-region OCR text
- * (Left Header column + Right Header column + Full image).
+ * (Left Header column + Right Header column + Full image) and snaps Agency against known catalog.
  */
 function parseVietnameseDocumentText(
   fullRawText: string,
   leftRawText: string,
   rightRawText: string,
   documentTypes: string[],
-  workFields: string[]
+  workFields: string[],
+  knownAgencies: string[] = [],
+  symbolAgencyHints: SymbolAgencyHint[] = []
 ): Omit<ScannedDocumentResult, 'engine' | 'fallbackNotice'> {
   const fullLines = toCleanLines(fullRawText);
   const leftLines = toCleanLines(leftRawText);
@@ -410,15 +638,13 @@ function parseVietnameseDocumentText(
 
   const fullText = fullLines.join('\n');
   const leftText = leftLines.join('\n');
-  const rightText = rightLines.join('\n');
 
-  // 1. Ngày ban hành: prioritize Right Header column (isolated from left column), then Full text
+  // 1. Ngày ban hành: STRICTLY from header zone only (Right Header crop first, then top header lines of Full text)
   const issued =
-    extractIssuedDateFromText(rightText) ||
-    extractIssuedDateFromText(fullLines.slice(0, 12).join('\n')) ||
-    extractIssuedDateFromText(fullText);
+    extractIssuedDateFromHeader(rightLines) ||
+    extractIssuedDateFromHeader(fullLines.slice(0, 12));
 
-  // 2. Số văn bản & Ký hiệu: prioritize Left Header column, then Full text
+  // 2. Số văn bản & Ký hiệu: prioritize Left Header column, then top header lines of Full text
   let number = '';
   let symbol = '';
   let leftNumberLineIdx = -1;
@@ -431,6 +657,8 @@ function parseVietnameseDocumentText(
   const extractNumberSymbolFromLines = (linesToScan: string[]) => {
     for (let i = 0; i < Math.min(linesToScan.length, 15); i++) {
       const line = linesToScan[i];
+      if (BODY_START_REGEX.test(line)) break;
+      if (CITATION_OR_TIMESTAMP_LINE_REGEX.test(line)) continue;
       for (const pattern of soLinePatterns) {
         const m = line.match(pattern);
         if (m) {
@@ -458,8 +686,8 @@ function parseVietnameseDocumentText(
     }
   }
 
-  // 3. Cơ quan ký: extract cleanly from Left Header column strictly above "Số:"
-  let agency = '';
+  // 3. Cơ quan ký: extract cleanly from Left Header column strictly above "Số:", then match against knownAgencies catalog!
+  let rawAgency = '';
   const agencyStopIdx = leftNumberLineIdx > 0 ? leftNumberLineIdx : Math.min(leftLines.length, 5);
   const leftAgencyRaw = leftLines
     .slice(0, agencyStopIdx)
@@ -477,20 +705,25 @@ function parseVietnameseDocumentText(
   );
 
   if (keywordMatchedAgencies.length > 0) {
-    // Prefer the direct issuing unit (2nd line if parent agency + direct unit both matched, e.g., BTL CSCĐ -> Trung đoàn CSCĐ số 7)
     const chosen =
       keywordMatchedAgencies.length >= 2
         ? keywordMatchedAgencies[keywordMatchedAgencies.length - 1]
         : keywordMatchedAgencies[0];
-    agency = normalizeAgencyName(chosen);
+    rawAgency = normalizeAgencyName(chosen);
   } else if (leftAgencyRaw.length > 0) {
-    // Only accept fallback agency line if it looks genuinely clean (at least 2 real words)
     const cleanWordLines = leftAgencyRaw.filter((l) => (l.match(/[A-Za-zÀ-ỹ]{2,}/g) || []).length >= 2);
     if (cleanWordLines.length > 0) {
       const chosen = cleanWordLines.length >= 2 ? cleanWordLines[cleanWordLines.length - 1] : cleanWordLines[0];
-      agency = normalizeAgencyName(chosen);
+      rawAgency = normalizeAgencyName(chosen);
     }
   }
+
+  const resolvedAgency = resolveAgencyWithCatalog(
+    rawAgency,
+    symbol,
+    knownAgencies,
+    symbolAgencyHints
+  );
 
   // 4. Loại văn bản
   let documentType = '';
@@ -522,6 +755,7 @@ function parseVietnameseDocumentText(
   let matchedHeadingName = '';
 
   for (let i = 0; i < Math.min(fullLines.length, 22); i++) {
+    if (BODY_START_REGEX.test(fullLines[i])) break;
     const key = searchKey(fullLines[i]);
     for (const heading of knownTypeHeadings) {
       const hKey = searchKey(heading);
@@ -541,12 +775,12 @@ function parseVietnameseDocumentText(
 
   // 5. Trích yếu nội dung
   let summary = '';
-  const bodyStopRegex = /^(k[íi]nh\s*g[ửu]i|c[ăa]n\s*c[ứu]|th[ựư]c\s*hi[ệe]n|n[ơo]i\s*nh[ậa]n|[I1]\.\s|[ĐD]i[ềe]u\s*1\b|th[ờo]i\s*gian)/i;
   const vvMarkerRegex = /^(?:V\s*[\/\\.,|]\s*[vVyY]|V[i1l][vV]|Về\s*việc)\b/i;
 
-  // Case A (Công văn): Check Left Header column right below "Số:" for "V/v ..." (or continuation lines before "Kính gửi:")
   const extractVvFromLines = (linesToScan: string[], startAfterIdx: number): { text: string; isCongVan: boolean } => {
-    const vvIdx = linesToScan.findIndex((l, idx) => idx >= Math.max(0, startAfterIdx) && idx < 20 && vvMarkerRegex.test(l));
+    const vvIdx = linesToScan.findIndex(
+      (l, idx) => idx >= Math.max(0, startAfterIdx) && idx < 20 && vvMarkerRegex.test(l)
+    );
     if (vvIdx !== -1) {
       const parts: string[] = [];
       for (let i = vvIdx; i < Math.min(linesToScan.length, vvIdx + 5); i++) {
@@ -556,19 +790,21 @@ function parseVietnameseDocumentText(
           .replace(/Hà\s*Nội\s*,?\s*ng[aà]y.*$/i, '')
           .replace(/ng[aàá]y\s*\d{1,2}\s*th[aá]ng.*$/i, '')
           .trim();
-        if (i > vvIdx && (bodyStopRegex.test(l) || /^[_\-=*]{3,}$/.test(l) || l.length < 3)) break;
+        if (i > vvIdx && (BODY_START_REGEX.test(l) || /^[_\-=*]{3,}$/.test(l) || l.length < 3)) break;
         if (l) parts.push(l);
       }
-      const joined = parts.join(' ').replace(/^(?:V\s*[\/\\.,|]\s*[vVyY]|V[i1l][vV])\s*[:.]?\s*/i, 'V/v ').trim();
+      const joined = parts
+        .join(' ')
+        .replace(/^(?:V\s*[\/\\.,|]\s*[vVyY]|V[i1l][vV])\s*[:.]?\s*/i, 'V/v ')
+        .trim();
       return { text: normalizeVietnameseTitle(joined), isCongVan: true };
     }
 
-    // Even if OCR slightly garbled "V/v", in a Công văn the lines immediately beneath "Số:..." in the left column are the summary!
     if (startAfterIdx >= 0 && headingLineIdx === -1) {
       const parts: string[] = [];
       for (let i = startAfterIdx + 1; i < Math.min(linesToScan.length, startAfterIdx + 5); i++) {
         const l = linesToScan[i].replace(/K[íi]nh\s*g[ửu]i.*$/i, '').trim();
-        if (bodyStopRegex.test(l) || /^[_\-=*]{3,}$/.test(l)) break;
+        if (BODY_START_REGEX.test(l) || /^[_\-=*]{3,}$/.test(l)) break;
         if (l.length >= 6 && (l.match(/[A-Za-zÀ-ỹ]/g) || []).length >= 5) {
           parts.push(l);
         }
@@ -583,7 +819,6 @@ function parseVietnameseDocumentText(
 
   let detectedCongVanLayout = false;
 
-  // Prefer Left Column for Công văn "V/v..." since right column date won't pollute it
   const leftVv = extractVvFromLines(leftLines, leftNumberLineIdx);
   if (leftVv.text) {
     summary = leftVv.text;
@@ -596,7 +831,6 @@ function parseVietnameseDocumentText(
     }
   }
 
-  // Case B: Centered document title heading (KẾ HOẠCH / QUYẾT ĐỊNH / HƯỚNG DẪN / QUY ĐỊNH / CHỈ THỊ...)
   if (!summary && headingLineIdx !== -1) {
     const headingLine = fullLines[headingLineIdx];
     const hKey = searchKey(matchedHeadingName);
@@ -610,14 +844,13 @@ function parseVietnameseDocumentText(
 
     for (let i = headingLineIdx + 1; i < Math.min(fullLines.length, headingLineIdx + 5); i++) {
       const l = fullLines[i];
-      if (bodyStopRegex.test(l) || /^[_\-=*]{3,}$/.test(l) || l.length < 4) break;
+      if (BODY_START_REGEX.test(l) || /^[_\-=*]{3,}$/.test(l) || l.length < 4) break;
       subParts.push(l);
     }
 
     summary = normalizeVietnameseTitle(subParts.join(' '));
   }
 
-  // Case C: Inline "V/v ..." or "về việc ..." anywhere in top half
   if (!summary) {
     const inlineMatch = `${leftText}\n${fullText}`.match(/((?:V\s*\/\s*v|Về\s+việc)[^\n]{8,220})/i);
     if (inlineMatch) {
@@ -626,7 +859,6 @@ function parseVietnameseDocumentText(
     }
   }
 
-  // Công văn rule (Nghị định 30): no type prefix in symbol (like E07-CT) + V/v block or Kính gửi without centered heading -> Công văn
   if (
     !documentType &&
     (detectedCongVanLayout ||
@@ -636,7 +868,6 @@ function parseVietnameseDocumentText(
     documentType = 'Công văn';
   }
 
-  // Map documentType cleanly to provided documentTypes
   if (documentType && documentTypes.length > 0) {
     const target = searchKey(documentType);
     const exact =
@@ -645,7 +876,7 @@ function parseVietnameseDocumentText(
     if (exact) documentType = exact;
   }
 
-  // 6. Lĩnh vực công tác (keyword inference)
+  // 6. Lĩnh vực công tác
   const matchedWorkFields: string[] = [];
   const searchPool = `${summary} ${leftText} ${fullText.slice(0, 600)}`;
   for (const item of WORK_FIELD_KEYWORDS) {
@@ -662,7 +893,8 @@ function parseVietnameseDocumentText(
     issued,
     number,
     symbol,
-    agency,
+    agency: resolvedAgency.agency,
+    agencySuggestions: resolvedAgency.suggestions,
     documentType,
     summary,
     workFields: matchedWorkFields,
@@ -690,10 +922,9 @@ async function scanWithOfflineTesseract(
     throw new DOMException('Aborted', 'AbortError');
   }
 
-  // Dynamic import keeps tesseract.js out of the initial JS bundle
   const { createWorker } = await import('tesseract.js');
 
-  let currentPhaseLabel = 'Đang đọc cột trái (Cơ quan, Số VB, Trích yếu)';
+  let currentPhaseLabel = 'OCR máy [1/3]: Đọc Cơ quan, Số VB & Trích yếu';
   const worker = await createWorker('vie', 1, {
     logger: (m: { status?: string; progress?: number }) => {
       if (options.signal?.aborted) return;
@@ -714,17 +945,14 @@ async function scanWithOfflineTesseract(
   options.signal?.addEventListener('abort', abortHandler, { once: true });
 
   try {
-    // Pass 1: Left Header column (Agency, Số/Ký hiệu, V/v trích yếu) — isolated from right column
     currentPhaseLabel = 'OCR máy [1/3]: Đọc Cơ quan, Số VB & Trích yếu';
     const leftRes = await worker.recognize(regions.leftHeaderUrl);
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-    // Pass 2: Right Header column (Quốc hiệu & Ngày ban hành)
-    currentPhaseLabel = 'OCR máy [2/3]: Đọc Ngày ban hành';
+    currentPhaseLabel = 'OCR máy [2/3]: Đọc Ngày ban hành (góc phải đầu trang)';
     const rightRes = await worker.recognize(regions.rightHeaderUrl);
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-    // Pass 3: Full image (for centered titles like KẾ HOẠCH/QUYẾT ĐỊNH & Kính gửi)
     currentPhaseLabel = 'OCR máy [3/3]: Tổng hợp toàn trang';
     const fullRes = await worker.recognize(regions.fullUrl);
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -734,7 +962,9 @@ async function scanWithOfflineTesseract(
       leftRes.data.text || '',
       rightRes.data.text || '',
       documentTypes,
-      workFields
+      workFields,
+      options.knownAgencies,
+      options.symbolAgencyHints
     );
 
     return {
@@ -761,10 +991,9 @@ export async function scanDocumentImage(
   options: ScanOptions = {}
 ): Promise<ScannedDocumentResult> {
   const mode: ScanMode = options.mode || 'auto';
-  const endpoint = resolveAiScanEndpoint();
+  const { url: endpointUrl, isCrossOrigin } = resolveAiScanEndpoint();
   const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
 
-  // User explicitly selected offline on-device OCR
   if (mode === 'offline') {
     return scanWithOfflineTesseract(
       prepared,
@@ -775,7 +1004,6 @@ export async function scanDocumentImage(
     );
   }
 
-  // Automatically use offline OCR if browser is offline or running on static PWA/APK without VITE_SCAN_API_URL
   if (isOffline) {
     return scanWithOfflineTesseract(
       prepared,
@@ -786,61 +1014,66 @@ export async function scanDocumentImage(
     );
   }
 
-  if (!endpoint) {
-    return scanWithOfflineTesseract(
-      prepared,
-      documentTypes,
-      workFields,
-      options,
-      'Đang chạy bản PWA/APK độc lập — đã tự động quét bằng OCR trên máy.'
-    );
-  }
-
-  // Try online AI backend first
-  options.onProgress?.('AI đang phân tích số văn bản, ngày ban hành, trích yếu...');
+  options.onProgress?.('AI trực tuyến đang phân tích số văn bản, ngày ban hành, trích yếu...');
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetch(endpointUrl, {
       method: 'POST',
+      mode: isCrossOrigin ? 'cors' : 'same-origin',
       headers: {
-        'Content-Type': 'application/json',
+        // Use text/plain for cross-origin calls to avoid CORS OPTIONS preflight blocking on shared gateways
+        'Content-Type': isCrossOrigin ? 'text/plain;charset=UTF-8' : 'application/json',
       },
       body: JSON.stringify({
         imageBase64: prepared.base64,
         mimeType: prepared.mimeType,
         documentTypes,
         workFields,
+        knownAgencies: options.knownAgencies || [],
       }),
       signal: options.signal,
     });
 
     const contentType = response.headers.get('content-type') || '';
-    const payload = contentType.includes('application/json')
-      ? await response.json().catch(() => null)
-      : null;
+    const isJsonResponse = contentType.includes('application/json');
+    const payload = isJsonResponse ? await response.json().catch(() => null) : null;
 
     if (response.ok && payload?.ok && payload.data) {
+      const aiData = payload.data as Omit<ScannedDocumentResult, 'engine' | 'agencySuggestions'>;
+      const resolvedAgency = resolveAgencyWithCatalog(
+        aiData.agency || '',
+        aiData.symbol || '',
+        options.knownAgencies,
+        options.symbolAgencyHints
+      );
       return {
-        ...(payload.data as Omit<ScannedDocumentResult, 'engine'>),
+        ...aiData,
+        agency: resolvedAgency.agency,
+        agencySuggestions: resolvedAgency.suggestions,
         engine: 'ai',
       };
     }
 
     const rawErrMsg = String(payload?.error || '');
+    const isAuthGateOrNonJsonCrossOrigin = isCrossOrigin && (!isJsonResponse || response.status === 401);
     const isTransientUnavailable =
+      isAuthGateOrNonJsonCrossOrigin ||
       [404, 405, 502, 503, 504].includes(response.status) ||
       /\b503\b|UNAVAILABLE|high demand/i.test(rawErrMsg);
 
-    // Static host / missing backend route / temporary AI 503 high-demand -> seamless fallback to Tesseract.js
     if (isTransientUnavailable) {
-      const reason =
-        response.status === 503 || /\b503\b|UNAVAILABLE|high demand/i.test(rawErrMsg)
-          ? 'Máy chủ AI đang quá tải tạm thời (503) — đã tự động chuyển sang OCR trên máy.'
-          : `Máy chủ AI không khả dụng (mã ${response.status}) — đã tự động chuyển sang OCR trên máy.`;
+      let reason: string;
+      if (isAuthGateOrNonJsonCrossOrigin) {
+        reason =
+          'Máy chủ AI trực tuyến đang yêu cầu đăng nhập/chưa bật công khai — đã tự động chuyển sang OCR trên máy.';
+      } else if (response.status === 503 || /\b503\b|UNAVAILABLE|high demand/i.test(rawErrMsg)) {
+        reason = 'Máy chủ AI đang quá tải tạm thời (503) — đã tự động chuyển sang OCR trên máy.';
+      } else {
+        reason = `Máy chủ AI không khả dụng (mã ${response.status}) — đã tự động chuyển sang OCR trên máy.`;
+      }
       return scanWithOfflineTesseract(prepared, documentTypes, workFields, options, reason);
     }
 
-    // Genuine AI API error (e.g., 403 invalid key, 429 quota exceeded, 400/500) -> surface clearly
     throw new Error(
       rawErrMsg || `Lỗi máy chủ AI (${response.status}). Vui lòng thử lại hoặc chọn chế độ OCR trên máy.`
     );
@@ -849,7 +1082,6 @@ export async function scanDocumentImage(
       throw err;
     }
 
-    // Network/CORS failure when reaching AI backend -> automatic fallback to on-device OCR
     if (
       err instanceof TypeError ||
       /failed to fetch|networkerror|load failed/i.test(String(err?.message || ''))
@@ -859,7 +1091,7 @@ export async function scanDocumentImage(
         documentTypes,
         workFields,
         options,
-        'Không kết nối được máy chủ AI — đã tự động chuyển sang OCR trên máy.'
+        'Không kết nối được máy chủ AI trực tuyến từ PWA — đã tự động chuyển sang OCR trên máy.'
       );
     }
 
