@@ -114,4 +114,22 @@ body {
   animation: scan-laser 1.4s ease-in-out infinite;
 }
 
+@keyframes marquee-bounce {
+  0%, 15% {
+    transform: translateX(0);
+  }
+  45%, 55% {
+    transform: translateX(var(--marquee-offset, 0px));
+  }
+  85%, 100% {
+    transform: translateX(0);
+  }
+}
+
+.animate-marquee-bounce {
+  display: inline-block;
+  will-change: transform;
+  animation: marquee-bounce var(--marquee-duration, 6.5s) ease-in-out infinite;
+}
+
 

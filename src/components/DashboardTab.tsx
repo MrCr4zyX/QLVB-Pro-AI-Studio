@@ -219,7 +219,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               <button
                 type="button"
                 onClick={onOpenSync}
-                className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-white border border-amber-300 text-amber-900 hover:bg-amber-100/70 transition active:scale-95 whitespace-nowrap"
+                className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-xs transition active:scale-95 whitespace-nowrap"
               >
                 Sao lưu
               </button>

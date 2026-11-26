@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { Bell, Download, RefreshCw, ShieldAlert, Smartphone } from 'lucide-react';
-import { usePWAInstall } from '../hooks/usePWAInstall';
+import React, { useState, useRef, useEffect } from 'react';
+import { Bell, RefreshCw } from 'lucide-react';
 import { sendSystemPushNotification } from '../hooks/useNotifications';
 import appLogo from '../assets/app-logo.png';
 
@@ -19,6 +18,38 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSync,
 }) => {
   const [imgError, setImgError] = useState(false);
+  const subtitleBoxRef = useRef<HTMLDivElement>(null);
+  const subtitleTextRef = useRef<HTMLSpanElement>(null);
+  const [marqueeOverflow, setMarqueeOverflow] = useState(0);
+
+  useEffect(() => {
+    const box = subtitleBoxRef.current;
+    const text = subtitleTextRef.current;
+    if (!box || !text) return;
+
+    const measure = () => {
+      const diff = Math.ceil(text.scrollWidth - box.clientWidth);
+      setMarqueeOverflow(diff > 1 ? diff + 6 : 0);
+    };
+
+    measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(box);
+    ro?.observe(text);
+    window.addEventListener('resize', measure);
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(measure).catch(() => {});
+    }
+
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, []);
+
+  const marqueeDuration = marqueeOverflow > 0
+    ? `${Math.max(5.5, Math.min(11, 4.5 + marqueeOverflow / 18)).toFixed(2)}s`
+    : undefined;
 
   return (
     <header
@@ -28,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Android-like Top Bar */}
       <div className="max-w-7xl mx-auto px-3.5 py-2 flex items-center justify-between gap-2">
         {/* Brand logo & title */}
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
           <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl overflow-hidden shadow-md shrink-0 border border-amber-400/50 bg-blue-950 flex items-center justify-center">
             {!imgError ? (
               <img
@@ -41,7 +72,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-amber-400 font-black text-xs tracking-wider">CAND</span>
             )}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <h1 className="text-sm sm:text-base font-bold text-white tracking-tight leading-none whitespace-nowrap">
                 QLVB Mobile
@@ -50,9 +81,27 @@ export const Header: React.FC<HeaderProps> = ({
                 PRO
               </span>
             </div>
-            <p className="text-[10px] text-blue-200/80 font-medium leading-tight mt-0.5 truncate">
-              QUẢN LÝ VĂN BẢN & BÁO CÁO
-            </p>
+            <div
+              ref={subtitleBoxRef}
+              className="overflow-hidden whitespace-nowrap mt-0.5 leading-tight"
+            >
+              <span
+                ref={subtitleTextRef}
+                className={`text-[10px] text-blue-200/80 font-medium inline-block whitespace-nowrap ${
+                  marqueeOverflow > 0 ? 'animate-marquee-bounce' : ''
+                }`}
+                style={
+                  marqueeOverflow > 0
+                    ? ({
+                        '--marquee-offset': `-${marqueeOverflow}px`,
+                        '--marquee-duration': marqueeDuration,
+                      } as React.CSSProperties)
+                    : undefined
+                }
+              >
+                QUẢN LÝ VĂN BẢN & BÁO CÁO
+              </span>
+            </div>
           </div>
         </div>
 
