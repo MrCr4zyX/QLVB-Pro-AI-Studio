@@ -1,5 +1,5 @@
 
-name: Build K02 Mobile APK
+name: Build QLVB Mobile APK
 
 on:
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
             cat > capacitor.config.json <<'EOF'
           {
             "appId": "com.k02.qlvbpro",
-            "appName": "K02 QLVB PRO",
+            "appName": "QLVB PRO MOBILE",
             "webDir": "dist",
             "server": {
               "androidScheme": "https"

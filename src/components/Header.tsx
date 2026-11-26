@@ -32,18 +32,18 @@ export const Header: React.FC<HeaderProps> = ({
             {!imgError ? (
               <img
                 src={appLogo}
-                alt="K02 Mobile QLVB"
+                alt="QLVB Mobile"
                 className="w-full h-full object-cover"
                 onError={() => setImgError(true)}
               />
             ) : (
-              <span className="text-amber-400 font-black text-xs tracking-wider">K02</span>
+              <span className="text-amber-400 font-black text-xs tracking-wider">CAND</span>
             )}
           </div>
           <div>
             <div className="flex items-center gap-1.5">
               <h1 className="text-sm sm:text-base font-bold text-white tracking-tight leading-none">
-                K02 Mobile QLVB
+                QLVB Mobile
               </h1>
               <span className="text-[9px] px-1 py-0.5 rounded font-bold bg-red-600/90 text-white tracking-wider">
               PRO
@@ -72,10 +72,10 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => {
               onOpenNotifications();
               sendSystemPushNotification(
-                '🔔 Cảnh báo hạn báo cáo K02',
+                '🔔 Cảnh báo hạn báo cáo!',
                 unreadAlertsCount > 0
                   ? `Có ${unreadAlertsCount} kỳ báo cáo quá hạn hoặc đến hạn cần xử lý!`
-                  : 'Hệ thống K02 Mobile: Đang theo dõi tiến độ báo cáo'
+                  : 'Hệ thống QLVB Mobile: Đang theo dõi tiến độ báo cáo'
               );
             }}
             className="relative p-2 rounded-lg bg-blue-800/70 hover:bg-blue-700/80 text-blue-100 transition active:scale-95"
