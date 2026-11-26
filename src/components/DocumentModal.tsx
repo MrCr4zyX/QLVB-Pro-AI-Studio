@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, AlertTriangle, Plus, Trash2, Calendar, Shield, Save, ChevronDown, FolderOpen, FileText, Folder } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { X, AlertTriangle, Plus, Trash2, Calendar, Shield, Save, ChevronDown, FolderOpen, FileText, Folder, Camera, ImagePlus, Loader2, CheckCircle2, Sparkles } from 'lucide-react';
 import {
   Document,
   Schedule,
@@ -10,6 +10,7 @@ import {
 } from '../types';
 import { displayDate, parseDateInput, parseFlexibleDate, searchKey, formatDateInputMask } from '../utils/dateUtils';
 import { ATTACHMENT_PREFIX, getAttachment, saveAttachment, openAttachment, chooseAttachmentFolder } from '../services/attachmentService';
+import { prepareImageForScan, scanDocumentImage } from '../utils/documentScanner';
 
 interface DocumentModalProps {
   isOpen: boolean;
@@ -130,6 +131,24 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [duplicateList, setDuplicateList] = useState<Document[]>([]);
   const [pendingSavePayload, setPendingSavePayload] = useState<any>(null);
+
+  // AI Document Scan state
+  const [scanMenuOpen, setScanMenuOpen] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanPreviewUrl, setScanPreviewUrl] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanSuccessMsg, setScanSuccessMsg] = useState<string | null>(null);
+  const [highlightedFields, setHighlightedFields] = useState<Record<string, boolean>>({});
+  const [webcamOpen, setWebcamOpen] = useState(false);
+  const [webcamError, setWebcamError] = useState<string | null>(null);
+
+  const scanMenuRef = useRef<HTMLDivElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const scanAbortRef = useRef<AbortController | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (documentToEdit) {
@@ -255,6 +274,274 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     }).catch(() => { if (active) setAttachmentName('Không đọc được file'); });
     return () => { active = false; };
   }, [attachment, isOpen]);
+
+  const stopWebcamStream = useCallback(() => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+  }, []);
+
+  const closeWebcam = useCallback(() => {
+    stopWebcamStream();
+    setWebcamOpen(false);
+    setWebcamError(null);
+  }, [stopWebcamStream]);
+
+  // Reset scan state when modal closes or reopens
+  useEffect(() => {
+    if (!isOpen) {
+      scanAbortRef.current?.abort();
+      scanAbortRef.current = null;
+      stopWebcamStream();
+      setWebcamOpen(false);
+      setWebcamError(null);
+      setScanMenuOpen(false);
+      setScanLoading(false);
+      setScanPreviewUrl(null);
+      setScanError(null);
+      setScanSuccessMsg(null);
+      setHighlightedFields({});
+      if (highlightTimerRef.current) {
+        window.clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+    }
+  }, [isOpen, stopWebcamStream]);
+
+  // Cleanup webcam & abort controller on unmount
+  useEffect(() => {
+    return () => {
+      scanAbortRef.current?.abort();
+      stopWebcamStream();
+      if (highlightTimerRef.current) {
+        window.clearTimeout(highlightTimerRef.current);
+      }
+    };
+  }, [stopWebcamStream]);
+
+  // Close scan dropdown when clicking outside
+  useEffect(() => {
+    if (!scanMenuOpen) return;
+    const handleOutside = (event: PointerEvent) => {
+      if (!scanMenuRef.current?.contains(event.target as Node)) {
+        setScanMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutside);
+    return () => document.removeEventListener('pointerdown', handleOutside);
+  }, [scanMenuOpen]);
+
+  const handleScanFile = useCallback(
+    async (file?: File | Blob | null) => {
+      if (!file) return;
+      setScanMenuOpen(false);
+      setScanError(null);
+      setScanSuccessMsg(null);
+      setScanLoading(true);
+
+      scanAbortRef.current?.abort();
+      const controller = new AbortController();
+      scanAbortRef.current = controller;
+
+      try {
+        const prepared = await prepareImageForScan(file);
+        if (controller.signal.aborted) return;
+        setScanPreviewUrl(prepared.previewUrl);
+
+        const result = await scanDocumentImage(
+          prepared,
+          documentTypes.map((t) => t.name),
+          workFields.map((f) => f.name),
+          controller.signal
+        );
+        if (controller.signal.aborted) return;
+
+        const filledLabels: string[] = [];
+        const newlyHighlighted: Record<string, boolean> = {};
+
+        // 1. Ngày ban hành
+        if (result.issued && parseDateInput(result.issued)) {
+          setIssued(result.issued);
+          filledLabels.push('Ngày ban hành');
+          newlyHighlighted.issued = true;
+        }
+
+        // 2. Số văn bản & Ký hiệu
+        let extractedNumber = (result.number || '').trim();
+        let extractedSymbol = (result.symbol || '').trim();
+        if (extractedNumber.includes('/') && !extractedSymbol) {
+          const slashIdx = extractedNumber.indexOf('/');
+          extractedSymbol = extractedNumber.slice(slashIdx + 1).trim();
+          extractedNumber = extractedNumber.slice(0, slashIdx).trim();
+        }
+        if (extractedNumber) {
+          setNumber(extractedNumber);
+          filledLabels.push('Số VB');
+          newlyHighlighted.number = true;
+        }
+        if (extractedSymbol) {
+          setSymbol(extractedSymbol);
+          filledLabels.push('Ký hiệu');
+          newlyHighlighted.symbol = true;
+        }
+
+        // 3. Cơ quan ký
+        if (result.agency) {
+          setAgency(result.agency);
+          filledLabels.push('Cơ quan ký');
+          newlyHighlighted.agency = true;
+        }
+
+        // 4. Loại văn bản
+        if (result.documentType) {
+          const targetKey = searchKey(result.documentType);
+          const matchedType =
+            documentTypes.find((t) => searchKey(t.name) === targetKey) ||
+            documentTypes.find(
+              (t) => searchKey(t.name).includes(targetKey) || targetKey.includes(searchKey(t.name))
+            );
+          if (matchedType) {
+            setTypeId(matchedType.id);
+            filledLabels.push('Loại VB');
+            newlyHighlighted.typeId = true;
+          }
+        }
+
+        // 5. Trích yếu nội dung
+        if (result.summary) {
+          setSummary(result.summary);
+          filledLabels.push('Trích yếu');
+          newlyHighlighted.summary = true;
+        }
+
+        // 6. Lĩnh vực công tác
+        if (Array.isArray(result.workFields) && result.workFields.length > 0) {
+          const matchedFieldIds = result.workFields
+            .map((name) => {
+              const key = searchKey(name);
+              return workFields.find((f) => searchKey(f.name) === key)?.id;
+            })
+            .filter((id): id is number => typeof id === 'number');
+          if (matchedFieldIds.length > 0) {
+            setSelectedFields(Array.from(new Set(matchedFieldIds)));
+            filledLabels.push('Lĩnh vực');
+            newlyHighlighted.fields = true;
+          }
+        }
+
+        if (filledLabels.length > 0) {
+          setHighlightedFields(newlyHighlighted);
+          if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current);
+          highlightTimerRef.current = window.setTimeout(() => {
+            setHighlightedFields({});
+          }, 3200);
+          setScanSuccessMsg(
+            `Đã quét & tự điền: ${filledLabels.join(', ')}. Vui lòng kiểm tra lại trước khi lưu.`
+          );
+        } else {
+          setScanError('Không đọc được thông tin rõ ràng từ ảnh. Vui lòng chụp cận cảnh phần đầu văn bản hơn.');
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || controller.signal.aborted) return;
+        setScanError(err?.message || 'Không thể nhận diện ảnh văn bản. Vui lòng thử lại.');
+      } finally {
+        if (!controller.signal.aborted) {
+          setScanLoading(false);
+        }
+        if (cameraInputRef.current) cameraInputRef.current.value = '';
+        if (galleryInputRef.current) galleryInputRef.current.value = '';
+      }
+    },
+    [documentTypes, workFields]
+  );
+
+  // Support Ctrl+V image paste while modal is open
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePaste = (e: ClipboardEvent) => {
+      if (scanLoading) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            e.preventDefault();
+            handleScanFile(file);
+            return;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [isOpen, scanLoading, handleScanFile]);
+
+  const handleOpenCamera = async () => {
+    setScanMenuOpen(false);
+    const isMobileDevice =
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+
+    // On phones/tablets, native camera input provides full-res autofocus & flash
+    if (isMobileDevice || !navigator.mediaDevices?.getUserMedia) {
+      cameraInputRef.current?.click();
+      return;
+    }
+
+    // On desktop, open live webcam viewfinder (with fallback to file picker on error)
+    setWebcamError(null);
+    setWebcamOpen(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      });
+      mediaStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch {
+      setWebcamError('Không thể mở camera trên thiết bị này. Bạn có thể chọn ảnh có sẵn từ máy.');
+    }
+  };
+
+  useEffect(() => {
+    if (webcamOpen && videoRef.current && mediaStreamRef.current) {
+      videoRef.current.srcObject = mediaStreamRef.current;
+    }
+  }, [webcamOpen]);
+
+  const handleCaptureWebcam = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        closeWebcam();
+        if (blob) handleScanFile(blob);
+      },
+      'image/jpeg',
+      0.9
+    );
+  };
+
+  const handleCancelScan = () => {
+    scanAbortRef.current?.abort();
+    scanAbortRef.current = null;
+    setScanLoading(false);
+    setScanPreviewUrl(null);
+  };
 
   if (!isOpen) return null;
 
@@ -441,20 +728,169 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs overflow-y-auto">
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[92vh] flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-900 to-indigo-900 px-4 py-3 flex items-center justify-between text-white shrink-0">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-amber-400" />
-            <h3 className="font-bold text-sm tracking-tight">
+        <div className="bg-gradient-to-r from-blue-900 to-indigo-900 px-4 py-3 flex items-center justify-between gap-2 text-white shrink-0 relative z-20">
+          <div className="flex items-center gap-2 min-w-0">
+            <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
+            <h3 className="font-bold text-sm tracking-tight truncate">
               {documentToEdit ? 'Chỉnh sửa văn bản' : 'Thêm văn bản mới'}
             </h3>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg text-blue-200 hover:text-white hover:bg-white/10"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Hidden inputs for Mobile Native Camera & Gallery/Desktop Image Picker */}
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => handleScanFile(e.target.files?.[0])}
+            />
+            <input
+              ref={galleryInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => handleScanFile(e.target.files?.[0])}
+            />
+
+            {/* Compact Scan Button with Effect right inside the modal header */}
+            <div ref={scanMenuRef} className="relative">
+              <button
+                type="button"
+                disabled={scanLoading}
+                onClick={() => setScanMenuOpen((v) => !v)}
+                title="Chụp hoặc chọn ảnh văn bản để AI tự điền form"
+                className={`scan-btn-effect inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold tracking-wide transition active:scale-95 border ${
+                  scanLoading
+                    ? 'bg-amber-500/25 border-amber-300/80 text-amber-200 cursor-wait'
+                    : 'bg-gradient-to-r from-amber-400/20 via-sky-400/20 to-amber-400/25 hover:from-amber-400/35 hover:to-sky-400/35 border-amber-300/85 text-white'
+                }`}
+              >
+                {scanLoading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300 shrink-0" />
+                    <span>Đang quét...</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                    <span>Scan</span>
+                  </>
+                )}
+              </button>
+
+              {scanMenuOpen && !scanLoading && (
+                <div className="absolute right-0 top-full mt-2 w-60 bg-white text-slate-800 rounded-xl shadow-2xl border border-slate-200 p-1.5 z-[120]">
+                  <button
+                    type="button"
+                    onClick={handleOpenCamera}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-blue-50 text-left transition"
+                  >
+                    <span className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                      <Camera className="w-4 h-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-bold text-slate-800">Chụp ảnh (Camera)</span>
+                      <span className="block text-[10px] text-slate-500">Mở máy ảnh chụp văn bản</span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScanMenuOpen(false);
+                      galleryInputRef.current?.click();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-indigo-50 text-left transition mt-0.5"
+                  >
+                    <span className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                      <ImagePlus className="w-4 h-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-bold text-slate-800">Chọn ảnh từ máy</span>
+                      <span className="block text-[10px] text-slate-500">Thư viện điện thoại hoặc máy tính</span>
+                    </span>
+                  </button>
+
+                  <div className="mt-1.5 pt-1.5 border-t border-slate-100 px-2 pb-0.5 text-[10px] text-slate-500 leading-snug">
+                    Hỗ trợ dán ảnh nhanh (<span className="font-semibold text-slate-600">Ctrl+V</span>). Chỉ quét văn bản độ mật <span className="font-semibold text-slate-600">Thường</span>.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1 rounded-lg text-blue-200 hover:text-white hover:bg-white/10"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
+
+        {/* Compact AI Scan Progress / Feedback Banner */}
+        {scanLoading && (
+          <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-200 flex items-center gap-3 shrink-0">
+            <div className="relative w-10 h-12 rounded-lg overflow-hidden bg-slate-900 border border-indigo-300 shrink-0 shadow-xs">
+              {scanPreviewUrl ? (
+                <img src={scanPreviewUrl} alt="Ảnh đang quét" className="w-full h-full object-cover opacity-85" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <Camera className="w-4 h-4 text-indigo-300" />
+                </div>
+              )}
+              <div className="animate-scan-laser absolute left-0 right-0 h-0.5 bg-amber-400 shadow-[0_0_8px_#fbbf24]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span>AI đang nhận diện văn bản...</span>
+              </div>
+              <p className="text-[11px] text-indigo-700/80 truncate">
+                Đang bóc tách số văn bản, ký hiệu, ngày ban hành, trích yếu nội dung
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleCancelScan}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 shrink-0"
+            >
+              Hủy
+            </button>
+          </div>
+        )}
+
+        {!scanLoading && scanSuccessMsg && (
+          <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-200 flex items-center gap-2 text-emerald-800 shrink-0">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="text-[11px] font-medium flex-1 leading-snug">{scanSuccessMsg}</span>
+            <button
+              type="button"
+              onClick={() => setScanSuccessMsg(null)}
+              className="p-0.5 rounded hover:bg-emerald-100 text-emerald-600"
+              aria-label="Đóng thông báo"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {!scanLoading && scanError && (
+          <div className="px-4 py-2 bg-rose-50 border-b border-rose-200 flex items-center gap-2 text-rose-800 shrink-0">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span className="text-[11px] font-medium flex-1 leading-snug">{scanError}</span>
+            <button
+              type="button"
+              onClick={() => setScanError(null)}
+              className="p-0.5 rounded hover:bg-rose-100 text-rose-600"
+              aria-label="Đóng cảnh báo"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto flex-1 text-xs">
@@ -471,7 +907,11 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 placeholder="dd/mm/yyyy"
                 value={issued}
                 onChange={(e) => setIssued((prev) => formatDateInputMask(e.target.value, prev))}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-800"
+                className={`w-full rounded-lg p-2 font-medium text-slate-800 transition ${
+                  highlightedFields.issued
+                    ? 'bg-emerald-50 border-2 border-emerald-400'
+                    : 'bg-slate-50 border border-slate-300'
+                }`}
                 required
               />
             </div>
@@ -485,12 +925,16 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 placeholder=" "
                 value={number}
                 onChange={(e) => setNumber(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-800 font-mono"
+                className={`w-full rounded-lg p-2 font-medium text-slate-800 font-mono transition ${
+                  highlightedFields.number
+                    ? 'bg-emerald-50 border-2 border-emerald-400'
+                    : 'bg-slate-50 border border-slate-300'
+                }`}
                 required
               />
             </div>
 
-            <div>
+            <div className={highlightedFields.symbol ? 'ring-2 ring-emerald-400 rounded-lg' : ''}>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 Ký hiệu *
               </label>
@@ -516,7 +960,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
 
           {/* Row 2: Agency, Type, Validity, Expiry */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-            <div>
+            <div className={highlightedFields.agency ? 'ring-2 ring-emerald-400 rounded-lg' : ''}>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 Cơ quan ký *
               </label>
@@ -530,7 +974,11 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
               <select
                 value={typeId}
                 onChange={(e) => setTypeId(Number(e.target.value))}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-800"
+                className={`w-full rounded-lg p-2 font-medium text-slate-800 transition ${
+                  highlightedFields.typeId
+                    ? 'bg-emerald-50 border-2 border-emerald-400'
+                    : 'bg-slate-50 border border-slate-300'
+                }`}
               >
                 {documentTypes.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -561,7 +1009,13 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
               Lĩnh vực công tác (chọn nhiều)
             </label>
-            <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200">
+            <div
+              className={`flex flex-wrap gap-1.5 p-2 rounded-xl transition ${
+                highlightedFields.fields
+                  ? 'bg-emerald-50 border-2 border-emerald-400'
+                  : 'bg-slate-50 border border-slate-200'
+              }`}
+            >
               {workFields.map((f) => {
                 const isSelected = selectedFields.includes(f.id);
                 return (
@@ -593,7 +1047,11 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
               placeholder="Nhập nội dung trích yếu của văn bản..."
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-800 leading-relaxed"
+              className={`w-full rounded-lg p-2 font-medium text-slate-800 leading-relaxed transition ${
+                highlightedFields.summary
+                  ? 'bg-emerald-50 border-2 border-emerald-400'
+                  : 'bg-slate-50 border border-slate-300'
+              }`}
               required
             />
           </div>
@@ -820,6 +1278,99 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
               >
                 Vẫn tiếp tục lưu
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Desktop Live Webcam Capture Modal */}
+      {webcamOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 text-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-700">
+            <div className="px-4 py-3 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Camera className="w-4 h-4 text-amber-400" />
+                <span className="font-bold text-sm">Chụp ảnh văn bản để quét AI</span>
+              </div>
+              <button
+                type="button"
+                onClick={closeWebcam}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {webcamError ? (
+                <div className="py-8 px-4 text-center space-y-3 bg-slate-800/70 rounded-xl border border-slate-700">
+                  <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" />
+                  <p className="text-xs text-slate-200 leading-relaxed">{webcamError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeWebcam();
+                      galleryInputRef.current?.click();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    <ImagePlus className="w-4 h-4" />
+                    <span>Chọn ảnh có sẵn từ máy</span>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3] border border-slate-700">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+                    {/* Framing corner guides */}
+                    <div className="pointer-events-none absolute inset-4 border border-white/25 rounded-lg">
+                      <span className="absolute -top-0.5 -left-0.5 w-5 h-5 border-t-2 border-l-2 border-amber-400 rounded-tl-md" />
+                      <span className="absolute -top-0.5 -right-0.5 w-5 h-5 border-t-2 border-r-2 border-amber-400 rounded-tr-md" />
+                      <span className="absolute -bottom-0.5 -left-0.5 w-5 h-5 border-b-2 border-l-2 border-amber-400 rounded-bl-md" />
+                      <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 border-b-2 border-r-2 border-amber-400 rounded-br-md" />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-400 text-center">
+                    Đưa phần đầu văn bản (Số/ký hiệu, Ngày ban hành, Cơ quan ký, Trích yếu) vào khung sáng rõ rồi bấm Chụp.
+                  </p>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeWebcam();
+                        galleryInputRef.current?.click();
+                      }}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 inline-flex items-center gap-1.5"
+                    >
+                      <ImagePlus className="w-3.5 h-3.5" />
+                      <span>Chọn ảnh</span>
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={closeWebcam}
+                        className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300"
+                      >
+                        Đóng
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCaptureWebcam}
+                        className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg inline-flex items-center gap-1.5 active:scale-95"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span>Chụp &amp; Quét</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
