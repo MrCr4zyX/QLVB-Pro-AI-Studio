@@ -71,6 +71,23 @@ async function startServer() {
   });
 
   app.post('/api/scan-document', async (req, res) => {
+    const extractErrorStatus = (err: any): number | undefined => {
+      if (typeof err?.status === 'number') return err.status;
+      if (typeof err?.code === 'number') return err.code;
+      const msg = String(err?.message || '');
+      try {
+        const parsed = JSON.parse(msg);
+        if (typeof parsed?.error?.code === 'number') return parsed.error.code;
+      } catch {
+        // Ignore JSON parse failure
+      }
+      if (/\b503\b|UNAVAILABLE|high demand/i.test(msg)) return 503;
+      if (/\b429\b|RESOURCE_EXHAUSTED/i.test(msg)) return 429;
+      if (/\b403\b|PERMISSION_DENIED/i.test(msg)) return 403;
+      if (/\b400\b|API_KEY_INVALID/i.test(msg)) return 400;
+      return undefined;
+    };
+
     try {
       const { imageBase64, mimeType, documentTypes, workFields } = req.body || {};
 
@@ -126,15 +143,15 @@ async function startServer() {
 
       const prompt = [
         'Bạn là chuyên gia số hóa văn bản hành chính Việt Nam (đặc biệt là văn bản khối Công an nhân dân, cơ quan nhà nước theo Nghị định 30/2020/NĐ-CP).',
-        'Hãy đọc thật chính xác hình ảnh trang văn bản đính kèm và trích xuất các thông tin sang JSON theo đúng schema yêu cầu:',
-        '1. issued: Ngày ban hành ở góc trên bên phải (ví dụ "Hà Nội, ngày 15 tháng 3 năm 2026") -> chuẩn hóa thành chuỗi DD/MM/YYYY (ví dụ "15/03/2026"). Nếu không thấy ngày rõ ràng, để chuỗi rỗng "".',
-        '2. number: Phần SỐ văn bản đứng trước dấu gạch chéo "/" trong dòng "Số: ...". Ví dụ "Số: 123/KH-BCA" -> "123"; "Số: 08/HD-CAT-PX01" -> "08". Không gồm chữ "Số:".',
-        '3. symbol: Phần KÝ HIỆU văn bản đứng sau dấu gạch chéo "/". Ví dụ "Số: 123/KH-BCA" -> "KH-BCA"; "Số: 1910/KH-E07-CT" -> "KH-E07-CT".',
-        '4. agency: Cơ quan ban hành văn bản ở góc trên bên trái. Nếu có 2 dòng (cơ quan chủ quản ở trên, cơ quan trực tiếp ban hành in đậm ở dưới), ưu tiên lấy cơ quan trực tiếp ban hành. Viết chuẩn chữ hoa chữ thường tiếng Việt tự nhiên (ví dụ "Bộ Công an", "Bộ Tư lệnh Cảnh sát cơ động", "Trung đoàn CSCĐ số 7"), không viết IN HOA toàn bộ trừ từ viết tắt.',
-        `5. documentType: Chọn ĐÚNG 1 tên loại văn bản khớp nhất trong danh sách sau: [${validTypes.join(', ')}]. Suy luận từ tiêu đề văn bản (KẾ HOẠCH, QUYẾT ĐỊNH, QUY ĐỊNH, HƯỚNG DẪN, CHỈ THỊ, THÔNG TƯ...) hoặc chữ viết tắt trong ký hiệu (KH -> Kế hoạch, QĐ -> Quyết định, QĐi -> Quy định, HD -> Hướng dẫn, CV -> Công văn, CT -> Chỉ thị, TT -> Thông tư, NQ -> Nghị quyết, NĐ -> Nghị định).`,
-        '6. summary: Trích yếu nội dung văn bản đầy đủ, chính xác dấu tiếng Việt. Với Công văn lấy phần "V/v ..." (có thể giữ gọn, bỏ chữ "V/v" ở đầu hoặc giữ tự nhiên); với Kế hoạch/Quyết định/Hướng dẫn/Chỉ thị/Quy định lấy tên loại văn bản + nội dung trích yếu ngay bên dưới tiêu đề (ví dụ "Kế hoạch về việc tổ chức..."). Viết chữ hoa đầu câu tự nhiên, không viết IN HOA toàn bộ.',
+        'Hãy đọc thật chính xác hình ảnh trang văn bản đính kèm (bố cục 2 cột đầu trang: trái là cơ quan ban hành, số/ký hiệu và trích yếu V/v; phải là Quốc hiệu và địa danh, ngày tháng năm) và trích xuất sang JSON:',
+        '1. issued: Ngày ban hành ở góc trên bên phải (ví dụ "Đắk Lắk, ngày17 tháng 11 năm 2026" hoặc "Hà Nội, ngày 15 tháng 3 năm 2026", kể cả khi viết dính "ngày17") -> chuẩn hóa thành chuỗi DD/MM/YYYY (ví dụ "17/11/2026"). Nếu không thấy rõ để chuỗi rỗng "".',
+        '2. number: Phần SỐ văn bản đứng trước dấu gạch chéo "/" trong dòng "Số: ...". Ví dụ "Số:2797 /E07-CT" -> "2797"; "Số: 08/HD-CAT-PX01" -> "08". Không gồm chữ "Số:" và không có khoảng trắng thừa.',
+        '3. symbol: Phần KÝ HIỆU văn bản đứng sau dấu gạch chéo "/". Ví dụ "Số:2797 /E07-CT" -> "E07-CT"; "Số: 1910/KH-E07-CT" -> "KH-E07-CT".',
+        '4. agency: Cơ quan ban hành văn bản ở góc trên bên trái. Nếu có 2 dòng (dòng trên là cơ quan chủ quản như "BỘ TƯ LỆNH CẢNH SÁT CƠ ĐỘNG", dòng dưới in đậm có gạch chân là cơ quan trực tiếp ban hành như "TRUNG ĐOÀN CSCĐ SỐ 7"), ưu tiên lấy cơ quan trực tiếp ban hành (dòng dưới). Viết chuẩn chữ hoa chữ thường tiếng Việt tự nhiên (ví dụ "Trung đoàn CSCĐ số 7", "Bộ Công an"), giữ nguyên viết tắt như CSCĐ, K02, BCA, UBND.',
+        `5. documentType: Chọn ĐÚNG 1 tên loại văn bản khớp nhất trong danh sách sau: [${validTypes.join(', ')}]. LƯU Ý QUAN TRỌNG: Công văn theo Nghị định 30 KHÔNG có tiêu đề tên loại ở giữa và ký hiệu thường KHÔNG có chữ "CV-" (ví dụ "Số: 2797/E07-CT" kèm dòng "V/v ..." ngay bên dưới và "Kính gửi:") -> loại văn bản là "Công văn". Các loại khác suy luận từ tiêu đề (KẾ HOẠCH, QUYẾT ĐỊNH, QUY ĐỊNH, HƯỚNG DẪN, CHỈ THỊ, THÔNG TƯ...) hoặc ký hiệu (KH -> Kế hoạch, QĐ -> Quyết định, QĐi -> Quy định, HD -> Hướng dẫn, CT -> Chỉ thị, TT -> Thông tư, NQ -> Nghị quyết, NĐ -> Nghị định).`,
+        '6. summary: Trích yếu nội dung văn bản đầy đủ, chính xác dấu tiếng Việt. Với Công văn lấy đầy đủ nội dung sau "V/v" ở ngay bên dưới dòng "Số:" cho đến trước "Kính gửi:" (ví dụ "V/v cấp thẻ BHYT đối với Lao động hợp đồng và thân nhân cán bộ, chiến sĩ năm 2027"). Với Kế hoạch/Quyết định/Hướng dẫn/Chỉ thị/Quy định lấy tên loại văn bản + nội dung trích yếu ngay bên dưới tiêu đề. Viết chữ hoa đầu câu tự nhiên.',
         validFields.length > 0
-          ? `7. workFields: Chọn tối đa 2 lĩnh vực công tác phù hợp nhất với trích yếu từ danh sách sau: [${validFields.join(', ')}]. Nếu không rõ thì trả mảng rỗng [].`
+          ? `7. workFields: Chọn tối đa 2 lĩnh vực công tác phù hợp nhất với trích yếu từ danh sách sau: [${validFields.join(', ')}]. Ví dụ BHYT, bảo hiểm, chế độ, thân nhân CBCS -> "Chế độ chính sách". Nếu không rõ thì trả mảng rỗng [].`
           : '7. workFields: Trả về mảng rỗng [].',
         'Lưu ý: Chỉ trích xuất đúng thông tin nhìn thấy trong ảnh, không bịa đặt. Nếu một trường không thấy hoặc bị mờ không đọc được thì để chuỗi rỗng "".',
       ].join('\n');
@@ -146,64 +163,80 @@ async function startServer() {
         },
       };
 
+      const schemaConfig = {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            issued: {
+              type: Type.STRING,
+              description: 'Ngày ban hành theo định dạng DD/MM/YYYY hoặc rỗng nếu không rõ.',
+            },
+            number: {
+              type: Type.STRING,
+              description: 'Phần số văn bản trước dấu gạch chéo /.',
+            },
+            symbol: {
+              type: Type.STRING,
+              description: 'Phần ký hiệu văn bản sau dấu gạch chéo /.',
+            },
+            agency: {
+              type: Type.STRING,
+              description: 'Tên cơ quan ban hành văn bản.',
+            },
+            documentType: {
+              type: Type.STRING,
+              description: 'Tên loại văn bản khớp với danh mục.',
+            },
+            summary: {
+              type: Type.STRING,
+              description: 'Trích yếu nội dung văn bản đầy đủ tiếng Việt có dấu.',
+            },
+            workFields: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: 'Danh sách lĩnh vực công tác phù hợp.',
+            },
+          },
+          required: ['issued', 'number', 'symbol', 'agency', 'documentType', 'summary', 'workFields'],
+        },
+      };
+
+      // Primary model + automatic fallback model when primary hits temporary 503 high-demand spikes
+      const attempts: Array<{ model: string; useThinkingLow: boolean; delayMs: number }> = [
+        { model: 'gemini-4-hydrogen', useThinkingLow: true, delayMs: 0 },
+        { model: 'gemini-4-hydrogen', useThinkingLow: true, delayMs: 700 },
+        { model: 'gemini-3.1-flash-lite', useThinkingLow: false, delayMs: 300 },
+      ];
+
       let responseText: string | undefined;
       let lastError: any = null;
 
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let i = 0; i < attempts.length; i++) {
+        const { model, useThinkingLow, delayMs } = attempts[i];
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
         try {
           const response = await ai.models.generateContent({
-            model: 'gemini-4-hydrogen',
+            model,
             contents: { parts: [imagePart, { text: prompt }] },
-            config: {
-              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  issued: {
-                    type: Type.STRING,
-                    description: 'Ngày ban hành theo định dạng DD/MM/YYYY hoặc rỗng nếu không rõ.',
-                  },
-                  number: {
-                    type: Type.STRING,
-                    description: 'Phần số văn bản trước dấu gạch chéo /.',
-                  },
-                  symbol: {
-                    type: Type.STRING,
-                    description: 'Phần ký hiệu văn bản sau dấu gạch chéo /.',
-                  },
-                  agency: {
-                    type: Type.STRING,
-                    description: 'Tên cơ quan ban hành văn bản.',
-                  },
-                  documentType: {
-                    type: Type.STRING,
-                    description: 'Tên loại văn bản khớp với danh mục.',
-                  },
-                  summary: {
-                    type: Type.STRING,
-                    description: 'Trích yếu nội dung văn bản đầy đủ tiếng Việt có dấu.',
-                  },
-                  workFields: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: 'Danh sách lĩnh vực công tác phù hợp.',
-                  },
-                },
-                required: ['issued', 'number', 'symbol', 'agency', 'documentType', 'summary', 'workFields'],
-              },
-            },
+            config: useThinkingLow
+              ? {
+                  ...schemaConfig,
+                  thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+                }
+              : schemaConfig,
           });
           responseText = response.text;
           break;
         } catch (err: any) {
           lastError = err;
-          const status = err?.status || err?.code;
-          const isRetryable = status === 500 || status === 503 || status === 504 || !status;
-          if (!isRetryable || attempt === 1) {
+          const status = extractErrorStatus(err);
+          const isTransient = status === 500 || status === 503 || status === 504 || !status;
+          if (!isTransient) {
             throw err;
           }
-          await new Promise((resolve) => setTimeout(resolve, 600));
         }
       }
 
@@ -228,9 +261,9 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('Document scan error:', err);
-      const status = err?.status || err?.code;
+      const status = extractErrorStatus(err);
       const msg = String(err?.message || '');
-      if (status === 403 || status === 400 && msg.includes('API_KEY')) {
+      if (status === 403 || (status === 400 && /API_KEY/i.test(msg))) {
         res.status(403).json({
           ok: false,
           error: 'API key không hợp lệ hoặc bị từ chối. Vui lòng kiểm tra trong mục Settings > Secrets.',
@@ -244,9 +277,16 @@ async function startServer() {
         });
         return;
       }
+      if (status === 503 || status === 504) {
+        res.status(503).json({
+          ok: false,
+          error: 'Máy chủ AI đang quá tải tạm thời. Hệ thống sẽ tự chuyển sang OCR trên máy.',
+        });
+        return;
+      }
       res.status(500).json({
         ok: false,
-        error: msg || 'Không thể nhận diện ảnh văn bản. Vui lòng chụp rõ hơn và thử lại.',
+        error: 'Không thể nhận diện ảnh văn bản bằng AI lúc này. Vui lòng thử lại hoặc chọn chế độ OCR trên máy.',
       });
     }
   });
