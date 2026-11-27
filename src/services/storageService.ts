@@ -10,9 +10,9 @@ import {
   DocumentChangeLog,
   EnrichedReport,
   EnrichedDocument,
+  AppDataState,
 } from '../types';
 import { generateDueDates, getReportDisplay, searchKey } from '../utils/dateUtils';
-import { AppDataState } from '../utils/excelSync';
 
 const STORAGE_KEY = 'k02_document_manager_data_v1';
 

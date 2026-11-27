@@ -1,5 +1,5 @@
 import { searchKey } from './dateUtils';
-import { OAUTH_REDIRECT_ORIGIN } from '../services/googleDriveService';
+import { OAUTH_REDIRECT_ORIGIN } from '../config/oauthConfig';
 
 export type ScanEngine = 'ai' | 'offline';
 export type ScanMode = 'auto' | 'offline';

@@ -78,7 +78,7 @@
 Workflow `.github/workflows/build-apk.yml` hỗ trợ đóng gói APK bản phát hành tối ưu dung lượng trực tiếp trên GitHub:
 
 - **Cách chạy:** Vào tab **Actions → Build QLVB Mobile APK → Run workflow** (có thể để trống `custom_version` để tự tăng phiên bản, hoặc nhập tay khi cần).
-- **Tự động tăng phiên bản:** Quét GitHub Releases/Tags hiện có và tự tăng tuần tự ( →  → ... →  → `), đồng thời phát hành file "QLVB-PRO-v<version>.apk" lên **GitHub Releases**.
+- **Tự động tăng phiên bản:** Quét GitHub Releases/Tags hiện có và tự tăng tuần tự (`20.3 → 20.4 → ... → 20.9 → 21.1`), đồng thời phát hành file `QLVB-PRO-v<version>.apk` lên **GitHub Releases**.
 - **Tối ưu dung lượng:** Bật R8 (`minifyEnabled`, `shrinkResources`), giữ ngôn ngữ `vi`/`en`, loại bỏ ảnh splash thừa và nén icon.
 - **Ký cố định để cài đè không lỗi chữ ký:** Thiết lập 4 **Repository Secrets** trong *Settings → Secrets and variables → Actions*:
   - `ANDROID_KEYSTORE_BASE64`: Chuỗi base64 của file `.keystore` (PKCS12)

@@ -115,4 +115,16 @@ export interface EnrichedDocument extends Document {
   pendingReportsCount: number;
 }
 
+export interface AppDataState {
+  documents: Document[];
+  schedules: Schedule[];
+  reports: ReportHistory[];
+  documentTypes: DocumentType[];
+  workFields: WorkField[];
+  documentFields: DocumentField[];
+  documentAmendments: DocumentAmendment[];
+  resultAudits: ResultAudit[];
+  changeLogs: DocumentChangeLog[];
+}
+
 export type TabType = 'dashboard' | 'documents' | 'reports' | 'calendar' | 'sync';

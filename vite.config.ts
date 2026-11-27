@@ -19,7 +19,7 @@ export default defineConfig(() => {
         manifest: {
           id: './',
           name: 'Quản Lý Văn Bản PRO',
-          short_name: 'QLVB K02 PRO',
+          short_name: 'QLVB PRO',
           description: 'Quản lý văn bản, theo dõi thời hạn báo cáo và đồng bộ',
           theme_color: '#1e40af',
           background_color: '#f8fafc',
@@ -66,6 +66,29 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),
+      },
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('/node_modules/xlsx/')) return 'vendor-xlsx';
+            if (id.includes('/node_modules/firebase/') || id.includes('/node_modules/@firebase/')) {
+              return 'vendor-firebase';
+            }
+            if (id.includes('/node_modules/tesseract.js/')) return 'vendor-ocr';
+            if (id.includes('/node_modules/lucide-react/')) return 'vendor-icons';
+            if (
+              id.includes('/node_modules/react/') ||
+              id.includes('/node_modules/react-dom/') ||
+              id.includes('/node_modules/scheduler/')
+            ) {
+              return 'vendor-react';
+            }
+            return undefined;
+          },
+        },
       },
     },
     server: {

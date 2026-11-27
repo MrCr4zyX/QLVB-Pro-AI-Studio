@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { X, AlertTriangle, Plus, Trash2, Calendar, Shield, Save, ChevronDown, FolderOpen, FileText, Folder, Camera, ImagePlus, Loader2, CheckCircle2, Sparkles, WifiOff } from 'lucide-react';
+import { X, Calendar, Save, FolderOpen, FileText, Folder, Camera, ImagePlus, Loader2, Sparkles, WifiOff } from 'lucide-react';
 import {
   Document,
   Schedule,
@@ -14,11 +14,14 @@ import {
   parseFlexibleDate,
   searchKey,
   formatDateInputMask,
-  formatFlexibleDateInputMask,
 } from '../utils/dateUtils';
 import { ATTACHMENT_PREFIX, getAttachment, saveAttachment, openAttachment, chooseAttachmentFolder } from '../services/attachmentService';
 import { prepareImageForScan, scanDocumentImage, ScanMode, ScanEngine } from '../utils/documentScanner';
 import { showToast } from './AppFeedback';
+import { HistoryCombo } from './document-modal/HistoryCombo';
+import { DocumentScanFeedback } from './document-modal/DocumentScanFeedback';
+import { ScheduleEditorSection, ScheduleFormItem } from './document-modal/ScheduleEditorSection';
+import { DuplicateWarningModal, WebcamCaptureModal } from './document-modal/DocumentSubModals';
 
 interface DocumentModalProps {
   isOpen: boolean;
@@ -35,69 +38,6 @@ interface DocumentModalProps {
   onConsumeInitialScan?: () => void;
 }
 
-// Editable combo box: offers existing values without restricting free typing.
-interface HistoryComboProps {
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-  placeholder?: string;
-  required?: boolean;
-  mono?: boolean;
-}
-
-const HistoryCombo: React.FC<HistoryComboProps> = ({ value, onChange, options, placeholder, required, mono }) => {
-  const [open, setOpen] = useState(false);
-  const [querying, setQuerying] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const matches = useMemo(() => {
-    const q = querying ? searchKey(value.trim()) : '';
-    return options.filter(item => !q || searchKey(item).includes(q));
-  }, [options, querying, value]);
-
-  useEffect(() => {
-    if (!open) return;
-    const outside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', outside);
-    return () => document.removeEventListener('pointerdown', outside);
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className="relative min-w-0">
-      <div className="flex items-stretch rounded-lg border border-slate-300 bg-slate-50 focus-within:ring-2 focus-within:ring-blue-200">
-        <input
-          type="text"
-          value={value}
-          required={required}
-          placeholder={placeholder}
-          onChange={event => { onChange(event.target.value); setQuerying(true); setOpen(true); }}
-          onFocus={() => { setQuerying(false); }}
-          onKeyDown={event => {
-            if (event.key === 'Escape') setOpen(false);
-            if (event.key === 'ArrowDown') { event.preventDefault(); setQuerying(false); setOpen(true); }
-          }}
-          className={`min-w-0 w-full bg-transparent p-2 text-slate-800 font-medium outline-none ${mono ? 'font-mono' : ''}`}
-        />
-        <button type="button" aria-label="Xem lịch sử đã nhập" aria-expanded={open}
-          onClick={() => { setQuerying(false); setOpen(v => !v); }}
-          className="shrink-0 px-2 border-l border-slate-200 text-slate-600 hover:bg-slate-100 rounded-r-lg">
-          <ChevronDown className="w-4 h-4" />
-        </button>
-      </div>
-      {open && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-[100] max-h-48 overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white shadow-xl">
-          {matches.length ? matches.map(item => (
-            <button type="button" key={item} onClick={() => { onChange(item); setOpen(false); setQuerying(false); }}
-              className="block w-full px-3 py-2 text-left text-xs text-slate-800 hover:bg-blue-50 focus:bg-blue-50 break-words">
-              {item}
-            </button>
-          )) : <div className="px-3 py-2 text-xs text-slate-500">Chưa có giá trị phù hợp</div>}
-        </div>
-      )}
-    </div>
-  );
-};
 
 export const DocumentModal: React.FC<DocumentModalProps> = ({
   isOpen,
@@ -133,13 +73,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [amendmentText, setAmendmentText] = useState('');
 
   // Schedules state
-  interface ScheduleItem {
-    kind: string;
-    enabled: boolean;
-    dateInput: string;
-    repeatRule: string;
-    yearInput: string;
-  }
+  type ScheduleItem = ScheduleFormItem;
 
   const [scheduleItems, setScheduleItems] = useState<ScheduleItem[]>([]);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
@@ -924,99 +858,22 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         </div>
 
         {/* Compact AI / Offline OCR Scan Progress & Feedback Banner */}
-        {scanLoading && (
-          <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-200 flex items-center gap-3 shrink-0">
-            <div className="relative w-10 h-12 rounded-lg overflow-hidden bg-slate-900 border border-indigo-300 shrink-0 shadow-xs">
-              {scanPreviewUrl ? (
-                <img src={scanPreviewUrl} alt="Ảnh đang quét" className="w-full h-full object-cover opacity-85" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <Camera className="w-4 h-4 text-indigo-300" />
-                </div>
-              )}
-              <div className="animate-scan-laser absolute left-0 right-0 h-0.5 bg-amber-400 shadow-[0_0_8px_#fbbf24]" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span>{scanMode === 'offline' ? 'Đang quét OCR trên máy...' : 'Đang nhận diện văn bản...'}</span>
-              </div>
-              <p className="text-[11px] text-indigo-700/90 truncate">
-                {scanStatusText}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleCancelScan}
-              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 shrink-0"
-            >
-              Hủy
-            </button>
-          </div>
-        )}
-
-        {!scanLoading && scanSuccessMsg && (
-          <div
-            className={`px-4 py-2 border-b flex items-start gap-2 shrink-0 ${
-              scanEngineUsed === 'offline'
-                ? 'bg-amber-50 border-amber-200 text-amber-900'
-                : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            }`}
-          >
-            <CheckCircle2
-              className={`w-4 h-4 shrink-0 mt-0.5 ${
-                scanEngineUsed === 'offline' ? 'text-amber-600' : 'text-emerald-600'
-              }`}
-            />
-            <div className="flex-1 min-w-0 space-y-0.5">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span
-                  className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                    scanEngineUsed === 'offline'
-                      ? 'bg-amber-200/80 text-amber-900'
-                      : 'bg-emerald-200/80 text-emerald-900'
-                  }`}
-                >
-                  {scanEngineUsed === 'offline' ? 'OCR trên máy' : 'AI trực tuyến'}
-                </span>
-                <span className="text-[11px] font-medium leading-snug">{scanSuccessMsg}</span>
-              </div>
-              {scanFallbackNotice && (
-                <p className="text-[10px] opacity-80 leading-snug">{scanFallbackNotice}</p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setScanSuccessMsg(null);
-                setScanFallbackNotice(null);
-              }}
-              className={`p-0.5 rounded ${
-                scanEngineUsed === 'offline'
-                  ? 'hover:bg-amber-100 text-amber-700'
-                  : 'hover:bg-emerald-100 text-emerald-600'
-              }`}
-              aria-label="Đóng thông báo"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
-
-        {!scanLoading && scanError && (
-          <div className="px-4 py-2 bg-rose-50 border-b border-rose-200 flex items-center gap-2 text-rose-800 shrink-0">
-            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span className="text-[11px] font-medium flex-1 leading-snug">{scanError}</span>
-            <button
-              type="button"
-              onClick={() => setScanError(null)}
-              className="p-0.5 rounded hover:bg-rose-100 text-rose-600"
-              aria-label="Đóng cảnh báo"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
+        <DocumentScanFeedback
+          scanLoading={scanLoading}
+          scanMode={scanMode}
+          scanStatusText={scanStatusText}
+          scanPreviewUrl={scanPreviewUrl}
+          scanSuccessMsg={scanSuccessMsg}
+          scanEngineUsed={scanEngineUsed}
+          scanFallbackNotice={scanFallbackNotice}
+          scanError={scanError}
+          onCancelScan={handleCancelScan}
+          onDismissSuccess={() => {
+            setScanSuccessMsg(null);
+            setScanFallbackNotice(null);
+          }}
+          onDismissError={() => setScanError(null)}
+        />
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto flex-1 text-xs">
@@ -1270,118 +1127,12 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
           </div>
 
           {/* SECTION: THỜI HẠN BÁO CÁO (Matching PC 3.5.10) */}
-          <div className="pt-2 border-t border-slate-200 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-black text-red-600 tracking-wider uppercase">
-                THỜI HẠN BÁO CÁO
-              </h4>
-              <button
-                type="button"
-                onClick={addPeriodicSchedule}
-                className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-lg border border-blue-200 flex items-center gap-1 hover:bg-blue-100"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Thêm định kỳ</span>
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {scheduleItems.map((item, idx) => (
-                <div
-                  key={item.kind}
-                  className={`p-2.5 rounded-xl border transition ${
-                    item.enabled ? 'bg-blue-50/50 border-blue-200' : 'bg-slate-50 border-slate-200'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 min-w-[90px]">
-                      <input
-                        type="checkbox"
-                        checked={item.enabled}
-                        onChange={(e) => updateScheduleItem(idx, { enabled: e.target.checked })}
-                        className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
-                      />
-                      <span>{item.kind}</span>
-                    </label>
-
-                    {item.enabled ? (
-                      <div className="flex items-center gap-2 flex-1 justify-end flex-wrap">
-                        <input
-                          type="text"
-                          inputMode={item.kind === 'Sắp tới' ? 'numeric' : undefined}
-                          maxLength={
-                            item.kind === 'Sắp tới' || item.kind === 'Sơ kết' || item.kind === 'Tổng kết'
-                              ? 10
-                              : undefined
-                          }
-                          placeholder={
-                            item.kind === 'Sắp tới'
-                              ? 'dd/mm/yyyy'
-                              : item.kind.startsWith('Định kỳ')
-                              ? item.repeatRule === 'Hằng năm'
-                                ? 'dd/mm'
-                                : 'Ngày (1-31)'
-                              : 'dd/mm/yyyy, dd/mm hoặc yyyy'
-                          }
-                          value={item.dateInput}
-                          onChange={(e) =>
-                            updateScheduleItem(idx, {
-                              dateInput:
-                                item.kind === 'Sắp tới'
-                                  ? formatDateInputMask(e.target.value, item.dateInput)
-                                  : item.kind === 'Sơ kết' || item.kind === 'Tổng kết'
-                                  ? formatFlexibleDateInputMask(e.target.value, item.dateInput)
-                                  : e.target.value,
-                            })
-                          }
-                          className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-800 font-medium text-xs min-w-[110px]"
-                        />
-
-                        {item.kind.startsWith('Định kỳ') ? (
-                          <select
-                            value={item.repeatRule}
-                            onChange={(e) => updateScheduleItem(idx, { repeatRule: e.target.value })}
-                            className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-700 font-medium text-xs"
-                          >
-                            <option value="Hằng tháng">Hằng tháng</option>
-                            <option value="Hằng quý">Hằng quý</option>
-                            <option value="Hằng năm">Hằng năm</option>
-                          </select>
-                        ) : (
-                          <select
-                            value={item.repeatRule}
-                            onChange={(e) => updateScheduleItem(idx, { repeatRule: e.target.value })}
-                            className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-700 font-medium text-xs"
-                          >
-                            <option value="Không lặp">Không lặp</option>
-                            <option value="Hằng năm">Hằng năm</option>
-                            <option value="Năm sau">Năm sau</option>
-                          </select>
-                        )}
-
-                        {item.kind.startsWith('Định kỳ') && item.repeatRule === 'Hằng quý' && (
-                          <span className="text-[10px] text-blue-700">Ngày {item.dateInput || '…'} các tháng 12, 3, 6, 9</span>
-                        )}
-
-                        {item.kind.startsWith('Định kỳ') && item.kind !== 'Định kỳ' && (
-                          <button
-                            type="button"
-                            onClick={() => removePeriodicSchedule(item.kind)}
-                            className="p-1 rounded text-red-500 hover:bg-red-50"
-                            title="Xóa kỳ này"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-[11px] text-slate-400 italic">Chưa kích hoạt</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <ScheduleEditorSection
+            scheduleItems={scheduleItems}
+            onAddPeriodicSchedule={addPeriodicSchedule}
+            onRemovePeriodicSchedule={removePeriodicSchedule}
+            onUpdateScheduleItem={updateScheduleItem}
+          />
 
           {/* Footer buttons */}
           <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
@@ -1404,140 +1155,27 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       </div>
 
       {/* Duplicate Warning Modal (Matching PC 3.5.10 behavior) */}
-      {showDuplicateWarning && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/70">
-          <div className="bg-white rounded-2xl max-w-md w-full p-4 space-y-3 shadow-2xl border-2 border-amber-500">
-            <div className="flex items-center gap-2 text-amber-600 font-bold text-sm">
-              <AlertTriangle className="w-5 h-5 shrink-0" />
-              <span>CẢNH BÁO: TRÙNG SỐ VÀ KÝ HIỆU VĂN BẢN!</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Hệ thống phát hiện văn bản có số <strong>{number}/{symbol}</strong> đã tồn tại trong cơ sở dữ liệu:
-            </p>
-            <div className="max-h-36 overflow-y-auto space-y-1.5 bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs">
-              {duplicateList.map((d) => (
-                <div key={d.id} className="p-1.5 bg-white rounded-lg border border-slate-200">
-                  <div className="font-bold text-slate-800">{d.number}/{d.symbol} • Ngày {displayDate(d.issued)}</div>
-                  <div className="text-slate-500 text-[11px]">{d.agency}</div>
-                  <div className="text-slate-700 text-[11px] truncate">{d.summary}</div>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs font-medium text-slate-700">
-              Bạn có chắc chắn vẫn muốn lưu văn bản này không?
-            </p>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowDuplicateWarning(false)}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700"
-              >
-                Quay lại sửa
-              </button>
-              <button
-                type="button"
-                onClick={confirmDuplicateSave}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs"
-              >
-                Vẫn tiếp tục lưu
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DuplicateWarningModal
+        isOpen={showDuplicateWarning}
+        number={number}
+        symbol={symbol}
+        duplicateList={duplicateList}
+        onCancel={() => setShowDuplicateWarning(false)}
+        onConfirm={confirmDuplicateSave}
+      />
 
       {/* Desktop Live Webcam Capture Modal */}
-      {webcamOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
-          <div className="bg-slate-900 text-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-700">
-            <div className="px-4 py-3 flex items-center justify-between border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <Camera className="w-4 h-4 text-amber-400" />
-                <span className="font-bold text-sm">Chụp ảnh văn bản để quét AI</span>
-              </div>
-              <button
-                type="button"
-                onClick={closeWebcam}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-3">
-              {webcamError ? (
-                <div className="py-8 px-4 text-center space-y-3 bg-slate-800/70 rounded-xl border border-slate-700">
-                  <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" />
-                  <p className="text-xs text-slate-200 leading-relaxed">{webcamError}</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      closeWebcam();
-                      galleryInputRef.current?.click();
-                    }}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    <ImagePlus className="w-4 h-4" />
-                    <span>Chọn ảnh có sẵn từ máy</span>
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3] border border-slate-700">
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                    />
-                    {/* Framing corner guides */}
-                    <div className="pointer-events-none absolute inset-4 border border-white/25 rounded-lg">
-                      <span className="absolute -top-0.5 -left-0.5 w-5 h-5 border-t-2 border-l-2 border-amber-400 rounded-tl-md" />
-                      <span className="absolute -top-0.5 -right-0.5 w-5 h-5 border-t-2 border-r-2 border-amber-400 rounded-tr-md" />
-                      <span className="absolute -bottom-0.5 -left-0.5 w-5 h-5 border-b-2 border-l-2 border-amber-400 rounded-bl-md" />
-                      <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 border-b-2 border-r-2 border-amber-400 rounded-br-md" />
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-slate-400 text-center">
-                    Đưa phần đầu văn bản (Số/ký hiệu, Ngày ban hành, Cơ quan ký, Trích yếu) vào khung sáng rõ rồi bấm Chụp.
-                  </p>
-                  <div className="flex items-center justify-between gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        closeWebcam();
-                        galleryInputRef.current?.click();
-                      }}
-                      className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 inline-flex items-center gap-1.5"
-                    >
-                      <ImagePlus className="w-3.5 h-3.5" />
-                      <span>Chọn ảnh</span>
-                    </button>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={closeWebcam}
-                        className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300"
-                      >
-                        Đóng
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCaptureWebcam}
-                        className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg inline-flex items-center gap-1.5 active:scale-95"
-                      >
-                        <Camera className="w-4 h-4" />
-                        <span>Chụp &amp; Quét</span>
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <WebcamCaptureModal
+        isOpen={webcamOpen}
+        webcamError={webcamError}
+        videoRef={videoRef}
+        onClose={closeWebcam}
+        onCapture={handleCaptureWebcam}
+        onPickFromGallery={() => {
+          closeWebcam();
+          galleryInputRef.current?.click();
+        }}
+      />
     </div>
   );
 };

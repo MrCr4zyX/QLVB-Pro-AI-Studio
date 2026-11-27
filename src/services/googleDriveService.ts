@@ -11,6 +11,8 @@ import {
   signOut
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { OAUTH_REDIRECT_ORIGIN } from '../config/oauthConfig';
+export { OAUTH_REDIRECT_ORIGIN };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
@@ -232,9 +234,6 @@ export const initAuth = (
 export const GOOGLE_OAUTH_CLIENT_ID =
   firebaseConfig.oAuthClientId ||
   '450311768751-rmgrrlikq544ip78je075n1pkpvorggr.apps.googleusercontent.com';
-
-export const OAUTH_REDIRECT_ORIGIN =
-  'https://ais-pre-zi5n6oemfk3n5aykcoslbd-383593929664.asia-east1.run.app';
 
 export const getOAuthRedirectUri = (): string => {
   if (typeof window !== 'undefined' && window.location.hostname.endsWith('.run.app')) {
