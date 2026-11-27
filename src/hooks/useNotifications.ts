@@ -147,7 +147,7 @@ async function ensureAndroidChannel(): Promise<void> {
   try {
     await LocalNotifications.createChannel({
       id: CHANNEL_ID,
-      name: 'Cảnh báo hạn báo cáo & Sao lưu K02',
+      name: 'Cảnh báo hạn báo cáo & Sao lưu!',
       description: 'Thông báo nhắc hạn văn bản, kỳ báo cáo và sao lưu dữ liệu định kỳ trên thanh trạng thái',
       importance: 5, // IMPORTANCE_HIGH -> shows on status bar + heads-up banner
       visibility: 1, // VISIBILITY_PUBLIC -> visible on lock screen & status bar
@@ -330,8 +330,8 @@ async function updateNativeSchedules(reports: EnrichedReport[]): Promise<void> {
       if (count === 0) continue;
       notifications.push({
         id: SCHEDULE_IDS[nextId++],
-        title: '🔔 K02 - Nhắc hạn báo cáo',
-        body: `Có ${count} kỳ báo cáo cần theo dõi trong 30 ngày tới. Mở K02 để kiểm tra.`,
+        title: '🔔 QLVB - Nhắc hạn báo cáo!',
+        body: `Có ${count} kỳ báo cáo cần theo dõi trong 30 ngày tới. Mở QLVB để kiểm tra.`,
         channelId: CHANNEL_ID,
         smallIcon: 'ic_stat_k02',
         iconColor: '#1E40AF',
@@ -345,7 +345,7 @@ async function updateNativeSchedules(reports: EnrichedReport[]): Promise<void> {
   upcomingMondaySlots.forEach((slotDate, idx) => {
     notifications.push({
       id: WEEKLY_BACKUP_SCHEDULE_IDS[idx],
-      title: '⚠️ CẢNH BÁO! Sao lưu dữ liệu K02',
+      title: '⚠️ CẢNH BÁO! Sao lưu dữ liệu!',
       body: 'Hãy sao lưu dữ liệu định kỳ! Nhấn để mở ứng dụng và sao lưu ngay.',
       channelId: CHANNEL_ID,
       smallIcon: 'ic_stat_k02',
@@ -425,7 +425,7 @@ export function useNotifications(reports: EnrichedReport[]) {
         setPermission('granted');
         playAlertChime();
         notifyAndroidNative(
-          '🔔 K02 - Đã bật thông báo Status Bar',
+          '🔔 Đã bật thông báo Status Bar',
           alertReports.length > 0
             ? `Có ${alertReports.length} kỳ báo cáo cần xử lý (${overdueCount} quá hạn).`
             : 'Thông báo hạn báo cáo và nhắc sao lưu 10:00 & 15:00 Thứ 2 đã được kích hoạt.'
@@ -441,7 +441,7 @@ export function useNotifications(reports: EnrichedReport[]) {
         if (granted) {
           playAlertChime();
           await sendSystemPushNotification(
-            '🔔 K02 - Đã bật thông báo Status Bar',
+            '🔔 Đã bật thông báo Status Bar',
             alertReports.length > 0
               ? `Có ${alertReports.length} kỳ báo cáo cần xử lý (${overdueCount} quá hạn).`
               : 'Thông báo hạn báo cáo và nhắc sao lưu 10:00 & 15:00 Thứ 2 đã được kích hoạt.',
@@ -458,7 +458,7 @@ export function useNotifications(reports: EnrichedReport[]) {
       if (result === 'granted') {
         playAlertChime();
         await sendSystemPushNotification(
-          '🔔 K02 - Đã bật thông báo Status Bar',
+          '🔔 Đã bật thông báo Status Bar',
           alertReports.length > 0
             ? `Có ${alertReports.length} kỳ báo cáo cần xử lý (${overdueCount} quá hạn).`
             : 'Đã bật thông báo hạn báo cáo & nhắc sao lưu 10:00 & 15:00 Thứ 2.',
@@ -507,7 +507,7 @@ export function useNotifications(reports: EnrichedReport[]) {
         ? `Có ${overdueCount} báo cáo quá hạn và ${alertReports.length - overdueCount} báo cáo sắp đến hạn!`
         : `Có ${alertReports.length} kỳ báo cáo sắp đến hạn trong 30 ngày tới.`;
 
-    void sendSystemPushNotification('🔔 Cảnh báo hạn báo cáo K02', msg, false);
+    void sendSystemPushNotification('🔔 Cảnh báo hạn báo cáo!', msg, false);
   }, [alertReports.length, overdueCount, permission]);
 
   useEffect(() => {
@@ -545,7 +545,7 @@ export function useNotifications(reports: EnrichedReport[]) {
           localStorage.setItem(weeklyPushKey, 'true');
           playAlertChime();
           void sendSystemPushNotification(
-            '⚠️ CẢNH BÁO! Sao lưu dữ liệu K02',
+            '⚠️ CẢNH BÁO! Sao lưu dữ liệu!',
             'Hãy sao lưu dữ liệu định kỳ! Nhấn để sao lưu ngay.',
             false
           );
@@ -557,7 +557,7 @@ export function useNotifications(reports: EnrichedReport[]) {
       const key = `k02_alert_slot_${currentDate}_${slot}`;
       if (localStorage.getItem(key) || alertReports.length === 0) return;
       void sendSystemPushNotification(
-        '🔔 K02 - Cảnh báo hạn báo cáo',
+        '🔔 Cảnh báo hạn báo cáo',
         `Có ${alertReports.length} kỳ báo cáo cần theo dõi (${overdueCount} quá hạn).`,
         false
       ).then((sent) => {

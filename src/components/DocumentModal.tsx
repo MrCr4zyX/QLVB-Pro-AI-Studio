@@ -8,7 +8,14 @@ import {
   SecurityLevel,
   EffectStatus,
 } from '../types';
-import { displayDate, parseDateInput, parseFlexibleDate, searchKey, formatDateInputMask } from '../utils/dateUtils';
+import {
+  displayDate,
+  parseDateInput,
+  parseFlexibleDate,
+  searchKey,
+  formatDateInputMask,
+  formatFlexibleDateInputMask,
+} from '../utils/dateUtils';
 import { ATTACHMENT_PREFIX, getAttachment, saveAttachment, openAttachment, chooseAttachmentFolder } from '../services/attachmentService';
 import { prepareImageForScan, scanDocumentImage, ScanMode, ScanEngine } from '../utils/documentScanner';
 import { showToast } from './AppFeedback';
@@ -1301,6 +1308,12 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                       <div className="flex items-center gap-2 flex-1 justify-end flex-wrap">
                         <input
                           type="text"
+                          inputMode={item.kind === 'Sắp tới' ? 'numeric' : undefined}
+                          maxLength={
+                            item.kind === 'Sắp tới' || item.kind === 'Sơ kết' || item.kind === 'Tổng kết'
+                              ? 10
+                              : undefined
+                          }
                           placeholder={
                             item.kind === 'Sắp tới'
                               ? 'dd/mm/yyyy'
@@ -1308,10 +1321,19 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                               ? item.repeatRule === 'Hằng năm'
                                 ? 'dd/mm'
                                 : 'Ngày (1-31)'
-                              : 'dd/mm/yyyy, mm/yyyy hoặc yyyy'
+                              : 'dd/mm/yyyy, dd/mm hoặc yyyy'
                           }
                           value={item.dateInput}
-                          onChange={(e) => updateScheduleItem(idx, { dateInput: e.target.value })}
+                          onChange={(e) =>
+                            updateScheduleItem(idx, {
+                              dateInput:
+                                item.kind === 'Sắp tới'
+                                  ? formatDateInputMask(e.target.value, item.dateInput)
+                                  : item.kind === 'Sơ kết' || item.kind === 'Tổng kết'
+                                  ? formatFlexibleDateInputMask(e.target.value, item.dateInput)
+                                  : e.target.value,
+                            })
+                          }
                           className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-800 font-medium text-xs min-w-[110px]"
                         />
 

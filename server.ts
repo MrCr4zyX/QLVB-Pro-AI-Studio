@@ -324,7 +324,7 @@ async function startServer() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Đang kết nối Google Drive - K02 QLVB PRO</title>
+  <title>Đang kết nối Google Drive - QLVB PRO</title>
   <style>
     body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; box-sizing: border-box; }
     .card { max-width: 420px; width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 20px; padding: 24px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
@@ -339,7 +339,7 @@ async function startServer() {
   <div class="card">
     <div class="spinner" id="sp"></div>
     <h2 id="title">Đang hoàn tất đăng nhập Google Drive...</h2>
-    <p id="desc">Vui lòng đợi trong giây lát, đang tự động chuyển về ứng dụng K02 QLVB PRO.</p>
+    <p id="desc">Vui lòng đợi trong giây lát, đang tự động chuyển về ứng dụng QLVB PRO.</p>
     <div id="actions"></div>
   </div>
   <script>
@@ -425,8 +425,8 @@ async function startServer() {
         if (state && state.apkAuth) {
           var deepLink = 'k02qlvb://auth?code=' + encodeURIComponent(bridgeCode);
           document.getElementById('title').textContent = '✓ Đã xác thực Google Drive thành công!';
-          document.getElementById('desc').textContent = 'Đang mở lại ứng dụng K02 QLVB PRO...';
-          document.getElementById('actions').innerHTML = '<a class="btn" href="' + deepLink + '">Mở Ứng Dụng K02 QLVB PRO</a>';
+          document.getElementById('desc').textContent = 'Đang mở lại ứng dụng QLVB PRO...';
+          document.getElementById('actions').innerHTML = '<a class="btn" href="' + deepLink + '">Mở Ứng Dụng QLVB PRO</a>';
           window.location.href = deepLink;
           return;
         }

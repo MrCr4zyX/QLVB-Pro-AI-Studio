@@ -1,11 +1,11 @@
 import { FullTextPopover } from './FullTextPopover';
-import React, { useState, useMemo, useRef } from 'react';
+import { QuickScanFab } from './QuickScanFab';
+import React, { useState, useMemo } from 'react';
 import {
   Search,
   Filter,
   X,
   Plus,
-  Camera,
   ArrowUpDown,
   FileText,
   Calendar,
@@ -50,7 +50,6 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
   const [sortBy, setSortBy] = useState<DocumentSortKey>('issued_desc');
   const [showFilters, setShowFilters] = useState(false);
   const [expandedDocIds, setExpandedDocIds] = useState<Set<string>>(new Set());
-  const quickCameraInputRef = useRef<HTMLInputElement>(null);
 
   const toggleExpand = (id: string) => {
     setExpandedDocIds((prev) => {
@@ -133,26 +132,11 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
     setSortBy('issued_desc');
   };
 
-  const handleQuickCameraFabClick = () => {
-    const isMobileDevice =
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
-      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-
-    // On phones/tablets, trigger native camera input synchronously inside user gesture
-    if (isMobileDevice || !navigator.mediaDevices?.getUserMedia) {
-      quickCameraInputRef.current?.click();
-      return;
-    }
-
-    // On desktop, open DocumentModal and launch live webcam viewfinder immediately
-    onQuickScan(null);
-  };
-
   return (
     <div className="pb-24 pt-3 px-4 sm:px-6 max-w-6xl mx-auto space-y-3 flex flex-col min-h-[calc(100vh-100px)]">
       {/* Search Bar */}
       <div className="bg-white rounded-2xl p-2.5 border border-slate-200/90 shadow-xs flex items-center gap-2">
-        <Search className="w-4 h-4 text-slate-400 shrink-0 ml-1" />
+        <Search className="w-4 h-4 animate-golden-blink shrink-0 ml-1" strokeWidth={3} />
         <input
           type="text"
           placeholder="Tìm theo số, ký hiệu, cơ quan, trích yếu..."
@@ -224,8 +208,8 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
             onChange={(e) => setSortBy(e.target.value as DocumentSortKey)}
             className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-200 cursor-pointer"
           >
-            <option value="issued_desc">Ngày BH mới nhất</option>
-            <option value="issued_asc">Ngày BH cũ nhất</option>
+            <option value="issued_desc">Mới nhất</option>
+            <option value="issued_asc">Cũ nhất</option>
             <option value="number_asc">Số văn bản (A → Z)</option>
             <option value="recent">Mới cập nhật</option>
           </select>
@@ -504,36 +488,12 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
         )}
       </div>
 
-      {/* Hidden Native Camera Input for Instant Mobile Quick Scan */}
-      <input
-        ref={quickCameraInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            onQuickScan(file);
-          }
-          e.target.value = '';
-        }}
-      />
-
-      {/* Floating Action Buttons (Quick Scan Camera + Add Document) */}
+      {/* Floating Action Buttons (Quick Scan Camera/Gallery + Add Document) */}
       <div
         className="fixed right-4 z-40 flex flex-col items-center gap-3"
         style={{ bottom: 'calc(5.25rem + env(safe-area-inset-bottom, 12px))' }}
       >
-        <button
-          type="button"
-          onClick={handleQuickCameraFabClick}
-          className="w-13 h-13 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:from-amber-700 active:to-orange-700 text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ring-4 ring-white/90"
-          aria-label="Quét nhanh văn bản bằng camera"
-          title="Quét nhanh văn bản bằng camera (AI)"
-        >
-          <Camera className="w-5 h-5" strokeWidth={2.3} />
-        </button>
+        <QuickScanFab onQuickScan={onQuickScan} size="sm" floating={false} />
 
         <button
           type="button"

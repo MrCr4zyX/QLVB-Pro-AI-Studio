@@ -1,5 +1,5 @@
 /**
- * Type definitions matching K02 Document Manager PC version 3.5.10
+ * Type definitions matching QLVB Document Manager PC version 3.5.10
  */
 
 export type SecurityLevel = 'Thường' | 'Mật' | 'Tối mật' | 'Tuyệt mật';
@@ -115,4 +115,4 @@ export interface EnrichedDocument extends Document {
   pendingReportsCount: number;
 }
 
-export type TabType = 'dashboard' | 'documents' | 'reports' | 'calendar' | 'stats' | 'sync';
+export type TabType = 'dashboard' | 'documents' | 'reports' | 'calendar' | 'sync';

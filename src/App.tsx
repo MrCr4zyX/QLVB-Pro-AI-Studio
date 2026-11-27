@@ -21,7 +21,6 @@ import { DashboardTab } from './components/DashboardTab';
 import { DocumentsTab } from './components/DocumentsTab';
 import { ReportsTab } from './components/ReportsTab';
 import { CalendarTab } from './components/CalendarTab';
-import { StatisticsTab } from './components/StatisticsTab';
 import { SyncTab } from './components/SyncTab';
 import { DocumentModal } from './components/DocumentModal';
 import { ReportResultModal } from './components/ReportResultModal';
@@ -375,11 +374,11 @@ export default function App() {
       <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-white px-4">
         <img
           src={splashPreviewImage}
-          alt="K02 QLVB PRO"
+          alt="QLVB PRO"
           className="w-[260px] h-[260px] max-w-[85vw] max-h-[60dvh] shrink-0 object-contain drop-shadow-xs mb-3"
         />
         <h1 className="text-xl sm:text-2xl font-black text-blue-900 tracking-wider text-center">
-          K02 QLVB PRO
+          QLVB PRO
         </h1>
         <p className="text-xs sm:text-sm font-semibold text-slate-500 tracking-widest uppercase mt-1 text-center">
           QUẢN LÝ VĂN BẢN & BÁO CÁO
@@ -470,15 +469,6 @@ export default function App() {
             reports={enrichedReports}
             onOpenReportResult={handleOpenReportResult}
             onToggleReportComplete={handleToggleReportComplete}
-          />
-        )}
-
-        {currentTab === 'stats' && (
-          <StatisticsTab
-            documents={enrichedDocuments}
-            documentTypes={appState.documentTypes}
-            workFields={appState.workFields}
-            onOpenDoc={(doc) => handleOpenDocModal(doc)}
           />
         )}
 

@@ -838,7 +838,7 @@ export async function getBackupFolderIds(token: string): Promise<string[]> {
     body: JSON.stringify({
       name: BACKUP_FOLDER_NAME,
       mimeType: 'application/vnd.google-apps.folder',
-      description: 'Thư mục tự động sao lưu dữ liệu K02 Mobile QLVB Pro (.xlsx)',
+      description: 'Thư mục tự động sao lưu dữ liệu Mobile QLVB Pro (.xlsx)',
     }),
   });
 
@@ -880,7 +880,7 @@ export async function uploadExcelBackupToDrive(
     name: filename,
     parents: [folderId],
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    description: `Bản sao lưu dữ liệu K02 Mobile QLVB Pro tạo lúc ${now.toLocaleString('vi-VN')}`,
+    description: `Bản sao lưu dữ liệu QLVB Mobile Pro tạo lúc ${now.toLocaleString('vi-VN')}`,
   };
 
   const boundary = '-------314159265358979323846';
@@ -1032,7 +1032,7 @@ export async function uploadApkToDrive(
 
   const metadata = {
     name: 'k02_mobile_qlvb_20.3.apk',
-    description: 'Ứng dụng Quản lý văn bản K02 Mobile trên Android (v20.3)',
+    description: 'Ứng dụng Quản lý văn bản PRO trên Android (v20.3)',
     mimeType: 'application/vnd.android.package-archive',
   };
 

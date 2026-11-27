@@ -166,7 +166,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
     if (isPortal && !pwaOrigin) {
       const deepLink = generateApkDeepLink(false, tokenOverride, userOverride);
       if (deepLink) {
-        setDriveStatus('✓ Đã xác thực thành công! Đang mở lại ứng dụng K02 QLVB PRO...');
+        setDriveStatus('✓ Đã xác thực thành công! Đang mở lại ứng dụng QLVB PRO...');
         setTimeout(() => {
           window.location.href = deepLink;
         }, 350);
@@ -686,7 +686,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
         onUpdateState(result.data);
         playSuccessChime();
         notifyAndroidNative(
-          'K02 Mobile - Khôi phục thành công',
+          'QLVB Mobile - Khôi phục thành công',
           `Đã nhập ${result.stats.documents} văn bản, ${result.stats.reports} báo cáo từ "${file.name}"`
         );
         setImportStatus({
@@ -700,7 +700,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       playAlertChime();
       setImportStatus({
         type: 'error',
-        message: `Lỗi khi nhập dữ liệu: ${error.message || 'File Excel không đúng định dạng chuẩn K02'}`,
+        message: `Lỗi khi nhập dữ liệu: ${error.message || 'File Excel không đúng định dạng chuẩn'}`,
       });
     } finally {
       setIsProcessing(false);
@@ -726,7 +726,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       markWeeklyBackupCompleted();
       playSuccessChime();
       notifyAndroidNative(
-        'K02 Mobile - Xuất Excel thành công',
+        'QLVB Mobile - Xuất Excel thành công',
         `Đã lưu: ${targetPath} (${count} văn bản)`
       );
       setImportStatus({
@@ -770,7 +770,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
 
       playSuccessChime();
       notifyAndroidNative(
-        'K02 Mobile - Sao lưu JSON thành công',
+        'QLVB Mobile - Sao lưu JSON thành công',
         `Đã lưu: ${targetPath}`
       );
       setImportStatus({
@@ -790,9 +790,9 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
 
   const handleResetSampleData = async () => {
     const confirmed = await showConfirm({
-      title: 'Đặt lại dữ liệu mẫu K02',
+      title: 'Đặt lại dữ liệu mẫu',
       message:
-        'Bạn có chắc chắn muốn đặt lại dữ liệu mẫu ban đầu? Toàn bộ dữ liệu hiện tại sẽ được thay thế bằng danh mục mẫu chuẩn K02.',
+        'Bạn có chắc chắn muốn đặt lại dữ liệu mẫu ban đầu? Toàn bộ dữ liệu hiện tại sẽ được thay thế bằng danh mục mẫu.',
       confirmText: 'Đặt lại',
       cancelText: 'Hủy',
       danger: true,
@@ -801,11 +801,11 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       const initial = generateInitialData();
       onUpdateState(initial);
       playSuccessChime();
-      notifyAndroidNative('K02 Mobile', 'Đã đặt lại dữ liệu mẫu K02 ban đầu');
-      showToast('Đã đặt lại dữ liệu mẫu K02 ban đầu thành công.', 'success');
+      notifyAndroidNative('QLVB Mobile', 'Đã đặt lại dữ liệu mẫu QLVB ban đầu');
+      showToast('Đã đặt lại dữ liệu mẫu QLVB ban đầu thành công.', 'success');
       setImportStatus({
         type: 'success',
-        message: 'Đã đặt lại dữ liệu mẫu K02 ban đầu thành công!',
+        message: 'Đã đặt lại dữ liệu mẫu QLVB ban đầu thành công!',
       });
     }
   };
@@ -825,7 +825,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
             message: 'Đã khôi phục dữ liệu từ file sao lưu JSON!',
           });
         } else {
-          setImportStatus({ type: 'error', message: 'Tệp JSON không đúng cấu trúc K02.' });
+          setImportStatus({ type: 'error', message: 'Tệp JSON không đúng cấu trúc.' });
         }
       } catch (err: any) {
         setImportStatus({ type: 'error', message: `Lỗi đọc file JSON: ${err.message}` });
@@ -1042,7 +1042,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
                 <div className="text-xs text-slate-600">
                   {isApkAuthPortal || pwaOriginParam ? (
                     <span className="font-semibold text-blue-900">
-                      Cổng xác thực Google Drive K02 PRO: Bấm nút bên phải để chọn tài khoản Google và tự động quay về ứng dụng:
+                      Cổng xác thực Google Drive PRO: Bấm nút bên phải để chọn tài khoản Google và tự động quay về ứng dụng:
                     </span>
                   ) : (
                     'Chưa kết nối Google Drive. Chọn phương thức đăng nhập để tự động sao lưu & khôi phục dữ liệu:'
@@ -1577,7 +1577,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
               <span>Nạp dữ liệu mẫu</span>
             </div>
             <div className="text-[11px] text-slate-500">
-              Mẫu TEST chuẩn văn bản hành chính K02
+              Mẫu TEST văn bản hành chính
             </div>
           </button>
         </div>
@@ -1606,7 +1606,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
       <div className="bg-blue-50/70 rounded-3xl p-4 border border-blue-200 text-xs text-blue-900 space-y-1.5 leading-relaxed">
         <div className="flex items-center gap-1.5 font-bold">
           <HelpCircle className="w-4 h-4 text-blue-600" />
-          <span>Hướng dẫn đồng bộ dữ liệu giữa Google Drive, PC và K02 Mobile:</span>
+          <span>Hướng dẫn đồng bộ dữ liệu giữa Google Drive, PC và QLVB Mobile:</span>
         </div>
         <ul className="list-disc list-inside space-y-1 text-[11px] text-blue-800/90 pl-1">
           <li><strong>Đồng bộ Google Drive:</strong> Khi bấm <em>"Sao lưu ngay lên Google Drive"</em>, hệ thống tự động tìm hoặc tạo thư mục <code>Backup_QLVB_Pro</code> trên Google Drive và lưu trữ file Excel với tên định dạng <code>YYYYMMDD_HHmmss_documents.xlsx</code>.</li>

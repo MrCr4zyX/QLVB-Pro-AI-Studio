@@ -4,7 +4,6 @@ import {
   FileText,
   Clock,
   Calendar,
-  BarChart3,
 } from 'lucide-react';
 import { TabType } from '../types';
 
@@ -24,7 +23,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     { id: 'documents' as TabType, label: 'Văn bản', icon: FileText },
     { id: 'reports' as TabType, label: 'Báo cáo', icon: Clock, badge: overdueCount },
     { id: 'calendar' as TabType, label: 'Lịch tháng', icon: Calendar },
-    { id: 'stats' as TabType, label: 'Thống kê', icon: BarChart3 },
   ];
 
   return (
@@ -32,7 +30,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-lg select-none"
       style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}
     >
-      <div className="max-w-xl mx-auto grid grid-cols-5 items-center px-1.5 pt-1 pb-0.5">
+      <div className="max-w-xl mx-auto grid grid-cols-4 items-center px-1.5 pt-1 pb-0.5">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = currentTab === tab.id;

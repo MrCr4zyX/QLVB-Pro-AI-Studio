@@ -196,7 +196,7 @@ export async function importFromExcelBuffer(
       }
       return {
         success: false,
-        message: 'File Excel không đúng cấu trúc K02 PC (yêu cầu các sheet: VAN_BAN, LICH_BAO_CAO, LICH_SU)',
+        message: 'File Excel không đúng cấu trúc QLVB PC (yêu cầu các sheet: VAN_BAN, LICH_BAO_CAO, LICH_SU)',
         stats: { documents: 0, schedules: 0, reports: 0, documentTypes: 0, workFields: 0 },
       };
     }

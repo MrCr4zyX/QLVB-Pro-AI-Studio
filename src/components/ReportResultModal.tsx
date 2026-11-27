@@ -133,7 +133,7 @@ export const ReportResultModal: React.FC<ReportResultModalProps> = ({
             </label>
             <input
               type="text"
-              placeholder="D:/K02/Ket_qua_bao_cao.pdf"
+              placeholder="D:/QLVB/Ket_qua_bao_cao.pdf"
               value={resultAttachment}
               onChange={(e) => setResultAttachment(e.target.value)}
               className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-800 font-mono text-[11px]"

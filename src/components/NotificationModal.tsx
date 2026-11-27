@@ -48,10 +48,10 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
     }
 
     const ok = await sendSystemPushNotification(
-      '🔔 Cảnh báo hạn báo cáo K02',
+      '🔔 Cảnh báo hạn báo cáo!',
       alertReports.length > 0
         ? `Có ${alertReports.length} kỳ báo cáo quá hạn hoặc đến hạn cần xử lý!`
-        : 'Hệ thống K02 Mobile hoạt động bình thường, tất cả báo cáo đúng tiến độ.'
+        : 'Hệ thống QLVB Mobile hoạt động bình thường, tất cả báo cáo đúng tiến độ.'
     );
 
     if (ok) {

@@ -47,7 +47,7 @@ export const DEFAULT_WORK_FIELDS: WorkField[] = [
 ];
 
 /**
- * Generate rich, realistic initial administrative documents for K02 Document Manager
+ * Generate rich, realistic initial administrative documents for QLVB Document Manager
  */
 export function generateInitialData(): AppDataState {
   const today = new Date();
@@ -66,7 +66,7 @@ export function generateInitialData(): AppDataState {
       agency: 'Công an tỉnh - Phòng Tham mưu',
       summary: 'Kế hoạch công tác trọng tâm năm và chế độ thông tin báo cáo định kỳ công tác tham mưu',
       notes: 'Báo cáo định kỳ trước ngày 20 hàng tháng về Văn phòng',
-      attachment: 'D:/K02/Ke_hoach_18_CAT_TM.pdf',
+      attachment: 'D:/QLVB/Ke_hoach_18_CAT_TM.pdf',
       updated: new Date().toISOString(),
       security_level: 'Thường',
       type_id: 10, // Kế hoạch
@@ -82,7 +82,7 @@ export function generateInitialData(): AppDataState {
       agency: 'Bộ Công an - V01',
       summary: 'Công văn chỉ đạo về tăng cường công tác phòng chống tội phạm công nghệ cao và bảo vệ an ninh mạng',
       notes: 'Báo cáo sơ kết 6 tháng và tổng kết năm gửi về Cục',
-      attachment: 'D:/K02/CV_45_BCA.docx',
+      attachment: 'D:/QLVB/CV_45_BCA.docx',
       updated: new Date().toISOString(),
       security_level: 'Mật',
       type_id: 9, // Công văn
@@ -98,7 +98,7 @@ export function generateInitialData(): AppDataState {
       agency: 'Ủy ban nhân dân tỉnh',
       summary: 'Quyết định ban hành Quy chế phối hợp liên ngành bảo đảm trật tự an toàn giao thông trên địa bàn tỉnh',
       notes: 'Báo cáo quý gửi về Ban An toàn giao thông tỉnh',
-      attachment: 'D:/K02/QD_120_UBND.pdf',
+      attachment: 'D:/QLVB/QD_120_UBND.pdf',
       updated: new Date().toISOString(),
       security_level: 'Thường',
       type_id: 5, // Quyết định
@@ -114,7 +114,7 @@ export function generateInitialData(): AppDataState {
       agency: 'Công an tỉnh - Phòng Tổ chức cán bộ',
       summary: 'Hướng dẫn đánh giá, phân loại cán bộ, chiến sĩ và bình xét thi đua khen thưởng định kỳ',
       notes: 'Báo cáo sơ kết thi đua đợt 1 và tổng kết cuối năm',
-      attachment: 'D:/K02/Huong_dan_08_TCCB.pdf',
+      attachment: 'D:/QLVB/Huong_dan_08_TCCB.pdf',
       updated: new Date().toISOString(),
       security_level: 'Thường',
       type_id: 11, // Hướng dẫn
@@ -130,7 +130,7 @@ export function generateInitialData(): AppDataState {
       agency: 'Tỉnh ủy',
       summary: 'Chỉ thị về nâng cao hiệu lực, hiệu quả công tác tiếp công dân, giải quyết khiếu nại, tố cáo',
       notes: 'Báo cáo định kỳ ngày 25 hàng tháng gửi Thường trực Tỉnh ủy',
-      attachment: 'D:/K02/Chi_thi_02_Tinh_uy.pdf',
+      attachment: 'D:/QLVB/Chi_thi_02_Tinh_uy.pdf',
       updated: new Date().toISOString(),
       security_level: 'Thường',
       type_id: 8, // Chỉ thị

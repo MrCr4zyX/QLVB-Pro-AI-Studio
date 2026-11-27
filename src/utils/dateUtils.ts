@@ -90,6 +90,95 @@ export function formatDateInputMask(value: string, prevValue = ''): string {
 }
 
 /**
+ * Auto-format flexible schedule date input (Sơ kết / Tổng kết):
+ * - Capped at max 8 digits (max 10 chars with '/')
+ * - 01012026 -> 01/01/2026 (dd/mm/yyyy)
+ * - 2026 -> 2026 (yyyy)
+ * - 1211 or 12/11 -> 12/11 (dd/mm)
+ * - 062026 or 06/2026 -> 06/2026 (mm/yyyy)
+ */
+export function formatFlexibleDateInputMask(value: string, prevValue = ''): string {
+  if (!value) return '';
+
+  // Allow natural backspacing without re-inserting slashes
+  if (prevValue && value.length < prevValue.length) {
+    return value.replace(/[^0-9/]/g, '');
+  }
+
+  const sanitized = value.replace(/[^0-9/]/g, '');
+  const digits = sanitized.replace(/\D/g, '').slice(0, 8);
+  if (digits.length === 0) return '';
+
+  // If user already has '/' in input (e.g. "12/11", "06/2026", "01/01/2026")
+  if (sanitized.includes('/')) {
+    if (digits.length === 8) {
+      return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+    }
+    let out = '';
+    let digitCount = 0;
+    let slashCount = 0;
+    for (const ch of sanitized) {
+      if (ch === '/') {
+        if (slashCount < 2 && out.length > 0 && !out.endsWith('/')) {
+          out += '/';
+          slashCount++;
+        }
+      } else if (digitCount < 8) {
+        out += ch;
+        digitCount++;
+      }
+    }
+    const parts = out.split('/');
+    if (
+      parts.length === 2 &&
+      parts[0].length === 2 &&
+      parts[1].length >= 3 &&
+      !/^(19|20|21)/.test(parts[1])
+    ) {
+      return `${parts[0]}/${parts[1].slice(0, 2)}/${parts[1].slice(2, 6)}`;
+    }
+    return out;
+  }
+
+  // Pure digits (no '/' yet)
+  if (digits.length <= 3) {
+    return digits;
+  }
+
+  if (digits.length === 4) {
+    const num = parseInt(digits, 10);
+    if (num >= 1900 && num <= 2199) {
+      return digits;
+    }
+    const dd = parseInt(digits.slice(0, 2), 10);
+    const mm = parseInt(digits.slice(2, 4), 10);
+    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) {
+      return `${digits.slice(0, 2)}/${digits.slice(2, 4)}`;
+    }
+    return digits;
+  }
+
+  if (digits.length === 5) {
+    const secondPair = parseInt(digits.slice(2, 4), 10);
+    if (secondPair > 12) {
+      return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    }
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  }
+
+  if (digits.length === 6) {
+    const mm = parseInt(digits.slice(0, 2), 10);
+    const yyyy = parseInt(digits.slice(2, 6), 10);
+    if (mm >= 1 && mm <= 12 && yyyy >= 1900 && yyyy <= 2199) {
+      return `${digits.slice(0, 2)}/${digits.slice(2, 6)}`;
+    }
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 6)}`;
+  }
+
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+}
+
+/**
  * Parse DD/MM/YYYY, DDMMYYYY, or YYYY-MM-DD to YYYY-MM-DD
  */
 export function parseDateInput(s: string): string | null {
@@ -140,21 +229,34 @@ export function parseFlexibleDate(value: string, annual = false, baseYear?: numb
   const clean = value.trim();
   if (!clean) throw new Error('Chưa nhập thời gian báo cáo');
 
-  // Handle dd/mm for annual
-  if (annual && clean.includes('/')) {
-    const parts = clean.split('/');
-    if (parts.length === 2 && parts.every((p) => /^\d+$/.test(p))) {
-      const day = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10);
-      const year = baseYear || new Date().getFullYear();
-      if (month < 1 || month > 12) throw new Error('Tháng phải từ 1 đến 12');
-      const maxD = daysInMonth(year, month);
-      const safeD = Math.min(day, maxD);
-      return {
-        start: `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(safeD).padStart(2, '0')}`,
-        precision: 'day',
-      };
+  // Raw 8 digits DDMMYYYY -> DD/MM/YYYY
+  if (/^\d{8}$/.test(clean)) {
+    const iso = parseDateInput(clean);
+    if (!iso) throw new Error('Ngày không hợp lệ (định dạng dd/mm/yyyy)');
+    return { start: iso, precision: 'day' };
+  }
+
+  // Raw 6 digits MMYYYY -> MM/YYYY
+  if (/^\d{6}$/.test(clean)) {
+    const m = parseInt(clean.slice(0, 2), 10);
+    const y = parseInt(clean.slice(2, 6), 10);
+    if (m >= 1 && m <= 12 && y >= 1900 && y <= 2199) {
+      return { start: `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}`, precision: 'month' };
     }
+  }
+
+  // Handle dd/mm (annual or flexible Sơ kết / Tổng kết)
+  if (/^\d{1,2}\/\d{1,2}$/.test(clean)) {
+    const [day, month] = clean.split('/').map((p) => parseInt(p, 10));
+    const year = baseYear || new Date().getFullYear();
+    if (month < 1 || month > 12) throw new Error('Tháng phải từ 1 đến 12');
+    const maxD = daysInMonth(year, month);
+    if (day < 1 || day > 31) throw new Error('Ngày phải từ 1 đến 31');
+    const safeD = Math.min(day, maxD);
+    return {
+      start: `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(safeD).padStart(2, '0')}`,
+      precision: 'day',
+    };
   }
 
   // DD/MM/YYYY
@@ -171,8 +273,21 @@ export function parseFlexibleDate(value: string, annual = false, baseYear?: numb
     return { start: `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}`, precision: 'month' };
   }
 
-  // YYYY
+  // YYYY (or raw 4-digit DDMM like 1211 when not a 1900-2199 year)
   if (/^\d{4}$/.test(clean)) {
+    const num = parseInt(clean, 10);
+    if (num < 1900 || num > 2199) {
+      const dd = parseInt(clean.slice(0, 2), 10);
+      const mm = parseInt(clean.slice(2, 4), 10);
+      if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) {
+        const year = baseYear || new Date().getFullYear();
+        const safeD = Math.min(dd, daysInMonth(year, mm));
+        return {
+          start: `${String(year).padStart(4, '0')}-${String(mm).padStart(2, '0')}-${String(safeD).padStart(2, '0')}`,
+          precision: 'day',
+        };
+      }
+    }
     return { start: clean, precision: 'year' };
   }
 
@@ -181,7 +296,8 @@ export function parseFlexibleDate(value: string, annual = false, baseYear?: numb
     return { start: clean, precision: 'day' };
   }
 
-  throw new Error('Thời gian phải là dd/mm/yyyy, mm/yyyy hoặc yyyy (nếu lặp hàng năm có thể nhập dd/mm)');
+  void annual;
+  throw new Error('Thời gian phải là dd/mm/yyyy, dd/mm, mm/yyyy hoặc yyyy');
 }
 
 /**

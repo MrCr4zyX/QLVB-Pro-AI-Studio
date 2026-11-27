@@ -128,12 +128,12 @@ export const FloatingNotification: React.FC<FloatingNotificationProps> = ({
               playAlertChime();
               if (showBackupAlert) {
                 void sendSystemPushNotification(
-                  '⚠️ CẢNH BÁO! Sao lưu dữ liệu K02',
+                  '⚠️ CẢNH BÁO! Sao lưu dữ liệu!',
                   'Hãy sao lưu dữ liệu định kỳ! (Nhắc lịch 10:00 & 15:00 Thứ 2 hàng tuần)'
                 );
               } else {
                 void sendSystemPushNotification(
-                  '🔔 Cảnh báo hạn báo cáo K02',
+                  '🔔 Cảnh báo hạn báo cáo!',
                   overdueCount > 0
                     ? `Có ${overdueCount} báo cáo quá hạn và ${urgentCount} báo cáo sắp đến hạn!`
                     : `Có ${urgentCount} báo cáo sắp đến hạn gấp!`

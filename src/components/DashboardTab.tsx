@@ -1,5 +1,6 @@
 import { FullTextPopover } from './FullTextPopover';
-import React, { useState, useMemo, useRef } from 'react';
+import { QuickScanFab } from './QuickScanFab';
+import React, { useState, useMemo } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -13,7 +14,6 @@ import {
   Edit2,
   DatabaseBackup,
   X,
-  Camera,
 } from 'lucide-react';
 import { EnrichedReport, EnrichedDocument } from '../types';
 import { formatDocCode, displayDate } from '../utils/dateUtils';
@@ -52,20 +52,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onEditDocument,
 }) => {
   const [alertDismissed, setAlertDismissed] = useState(false);
-  const quickCameraInputRef = useRef<HTMLInputElement>(null);
-
-  const handleQuickCameraFabClick = () => {
-    const isMobileDevice =
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
-      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-
-    if (isMobileDevice || !navigator.mediaDevices?.getUserMedia) {
-      quickCameraInputRef.current?.click();
-      return;
-    }
-
-    onQuickScan(null);
-  };
   const now = new Date();
   const [periodMode, setPeriodMode] = useState<'Toàn bộ' | 'Tháng' | 'Quý' | 'Năm'>('Toàn bộ');
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
@@ -537,33 +523,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         )}
       </div>
 
-      {/* Hidden Native Camera Input for Instant Mobile Quick Scan */}
-      <input
-        ref={quickCameraInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            onQuickScan(file);
-          }
-          e.target.value = '';
-        }}
-      />
-
-      {/* Floating Quick Scan Camera FAB */}
-      <button
-        type="button"
-        onClick={handleQuickCameraFabClick}
-        className="fixed right-4 z-40 w-14 h-14 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:from-amber-700 active:to-orange-700 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ring-4 ring-white/90"
-        style={{ bottom: 'calc(5.25rem + env(safe-area-inset-bottom, 12px))' }}
-        aria-label="Quét nhanh văn bản bằng camera"
-        title="Quét nhanh văn bản bằng camera (AI)"
-      >
-        <Camera className="w-6 h-6" strokeWidth={2.3} />
-      </button>
+      {/* Floating Quick Scan FAB (Camera + Gallery) */}
+      <QuickScanFab onQuickScan={onQuickScan} size="md" floating />
     </div>
   );
 };
