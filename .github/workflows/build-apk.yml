@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       custom_version:
-        description: 'Phiên bản tùy chọn (để trống để tự động tăng 20.3 -> 20.4 -> ... -> 20.9 -> 21.1)'
+        description: 'Phiên bản tùy chọn (để trống để tự động -> tăng)'
         required: false
         default: ''
         type: string
