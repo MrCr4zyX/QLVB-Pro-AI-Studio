@@ -18,29 +18,20 @@ import { useNotifications } from './hooks/useNotifications';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { DashboardTab } from './components/DashboardTab';
+import { DocumentsTab } from './components/DocumentsTab';
+import { ReportsTab } from './components/ReportsTab';
+import { CalendarTab } from './components/CalendarTab';
+import { ReportResultModal } from './components/ReportResultModal';
+import { NotificationModal } from './components/NotificationModal';
 import { AppFeedbackHost, showConfirm, showToast } from './components/AppFeedback';
 
-const DocumentsTab = lazy(() =>
-  import('./components/DocumentsTab').then((m) => ({ default: m.DocumentsTab }))
-);
-const ReportsTab = lazy(() =>
-  import('./components/ReportsTab').then((m) => ({ default: m.ReportsTab }))
-);
-const CalendarTab = lazy(() =>
-  import('./components/CalendarTab').then((m) => ({ default: m.CalendarTab }))
-);
+const loadDocumentModal = () =>
+  import('./components/DocumentModal').then((m) => ({ default: m.DocumentModal }));
+
 const SyncTab = lazy(() =>
   import('./components/SyncTab').then((m) => ({ default: m.SyncTab }))
 );
-const DocumentModal = lazy(() =>
-  import('./components/DocumentModal').then((m) => ({ default: m.DocumentModal }))
-);
-const ReportResultModal = lazy(() =>
-  import('./components/ReportResultModal').then((m) => ({ default: m.ReportResultModal }))
-);
-const NotificationModal = lazy(() =>
-  import('./components/NotificationModal').then((m) => ({ default: m.NotificationModal }))
-);
+const DocumentModal = lazy(loadDocumentModal);
 const InstallApkModal = lazy(() =>
   import('./components/InstallApkModal').then((m) => ({ default: m.InstallApkModal }))
 );
@@ -49,7 +40,7 @@ const TabLoadingFallback: React.FC = () => (
   <div className="flex items-center justify-center py-16 px-4">
     <div className="flex items-center gap-2.5 bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-xs text-xs font-semibold text-slate-600">
       <span className="w-4 h-4 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
-      <span>Đang tải giao diện...</span>
+      <span>Đang tải đồng bộ...</span>
     </div>
   </div>
 );
@@ -126,6 +117,24 @@ export default function App() {
   useEffect(() => {
     saveAppData(appState);
   }, [appState]);
+
+  // Silently prefetch DocumentModal during browser idle time after startup paint
+  useEffect(() => {
+    const win = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof win.requestIdleCallback === 'function') {
+      const id = win.requestIdleCallback(() => {
+        void loadDocumentModal();
+      }, { timeout: 2500 });
+      return () => win.cancelIdleCallback?.(id);
+    }
+    const timer = window.setTimeout(() => {
+      void loadDocumentModal();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Enriched records
   const enrichedReports = useMemo(() => getEnrichedReports(appState), [appState]);
@@ -458,57 +467,57 @@ export default function App() {
           />
         )}
 
-        <Suspense fallback={<TabLoadingFallback />}>
-          {currentTab === 'documents' && (
-            <DocumentsTab
-              documents={enrichedDocuments}
-              documentTypes={appState.documentTypes}
-              workFields={appState.workFields}
-              onAddNew={() => handleOpenDocModal()}
-              onQuickScan={handleQuickScanDocument}
-              onEdit={(doc) => handleOpenDocModal(doc)}
-              onDelete={handleDeleteDocument}
-              onViewReportsForDoc={(docId) => {
-                setReportsInitialFilter(null);
-                setReportsPeriod(null);
-                setReportsNavigationId(id => id + 1);
-                setCurrentTab('reports');
-              }}
-            />
-          )}
+        {currentTab === 'documents' && (
+          <DocumentsTab
+            documents={enrichedDocuments}
+            documentTypes={appState.documentTypes}
+            workFields={appState.workFields}
+            onAddNew={() => handleOpenDocModal()}
+            onQuickScan={handleQuickScanDocument}
+            onEdit={(doc) => handleOpenDocModal(doc)}
+            onDelete={handleDeleteDocument}
+            onViewReportsForDoc={(docId) => {
+              setReportsInitialFilter(null);
+              setReportsPeriod(null);
+              setReportsNavigationId(id => id + 1);
+              setCurrentTab('reports');
+            }}
+          />
+        )}
 
-          {currentTab === 'reports' && (
-            <ReportsTab
-              key={reportsNavigationId}
-              reports={enrichedReports}
-              initialPeriod={reportsPeriod}
-              initialFilter={reportsInitialFilter}
-              onOpenReportResult={handleOpenReportResult}
-              onToggleReportComplete={handleToggleReportComplete}
-              onEditDocumentById={(docId) => {
-                const targetDoc = enrichedDocuments.find((d) => d.id === docId);
-                if (targetDoc) handleOpenDocModal(targetDoc);
-              }}
-            />
-          )}
+        {currentTab === 'reports' && (
+          <ReportsTab
+            key={reportsNavigationId}
+            reports={enrichedReports}
+            initialPeriod={reportsPeriod}
+            initialFilter={reportsInitialFilter}
+            onOpenReportResult={handleOpenReportResult}
+            onToggleReportComplete={handleToggleReportComplete}
+            onEditDocumentById={(docId) => {
+              const targetDoc = enrichedDocuments.find((d) => d.id === docId);
+              if (targetDoc) handleOpenDocModal(targetDoc);
+            }}
+          />
+        )}
 
-          {currentTab === 'calendar' && (
-            <CalendarTab
-              reports={enrichedReports}
-              onOpenReportResult={handleOpenReportResult}
-              onToggleReportComplete={handleToggleReportComplete}
-            />
-          )}
+        {currentTab === 'calendar' && (
+          <CalendarTab
+            reports={enrichedReports}
+            onOpenReportResult={handleOpenReportResult}
+            onToggleReportComplete={handleToggleReportComplete}
+          />
+        )}
 
-          {currentTab === 'sync' && (
+        {currentTab === 'sync' && (
+          <Suspense fallback={<TabLoadingFallback />}>
             <SyncTab
               appState={appState}
               onUpdateState={(newState) => {
                 setAppState(ensureSchedulesAndReports(newState));
               }}
             />
-          )}
-        </Suspense>
+          </Suspense>
+        )}
       </main>
 
       {/* Android Bottom Navigation Bar */}
@@ -523,7 +532,36 @@ export default function App() {
         overdueCount={overdueCount}
       />
 
-      {/* Modals (lazy-loaded on first open) */}
+      {/* Lightweight Modals (instant open) */}
+      <ReportResultModal
+        isOpen={isReportResultModalOpen}
+        onClose={() => {
+          setIsReportResultModalOpen(false);
+          setSelectedReportId(null);
+        }}
+        report={currentReportForEditor}
+        onSaveResult={(...args) => {
+          handleSaveReportResult(...args);
+          showToast('Đã lưu kết quả kỳ báo cáo.', 'success');
+        }}
+        onUndoReport={(id) => {
+          handleUndoReport(id);
+          showToast('Đã hoàn tác kỳ báo cáo về chưa hoàn thành.', 'info');
+        }}
+        resultAudits={appState.resultAudits}
+      />
+
+      <NotificationModal
+        isOpen={isNotificationModalOpen}
+        onClose={() => setIsNotificationModalOpen(false)}
+        alertReports={alertReports}
+        permission={permission}
+        onRequestPermission={requestPermission}
+        onGoToDashboard={() => setCurrentTab('dashboard')}
+        onOpenReportResult={handleOpenReportResult}
+      />
+
+      {/* Heavy Modals (lazy-loaded on demand / idle-prefetched) */}
       <Suspense fallback={null}>
         {isDocModalOpen && (
           <DocumentModal
@@ -546,38 +584,6 @@ export default function App() {
               setQuickScanFile(null);
               setQuickScanAutoCamera(false);
             }}
-          />
-        )}
-
-        {isReportResultModalOpen && (
-          <ReportResultModal
-            isOpen={isReportResultModalOpen}
-            onClose={() => {
-              setIsReportResultModalOpen(false);
-              setSelectedReportId(null);
-            }}
-            report={currentReportForEditor}
-            onSaveResult={(...args) => {
-              handleSaveReportResult(...args);
-              showToast('Đã lưu kết quả kỳ báo cáo.', 'success');
-            }}
-            onUndoReport={(id) => {
-              handleUndoReport(id);
-              showToast('Đã hoàn tác kỳ báo cáo về chưa hoàn thành.', 'info');
-            }}
-            resultAudits={appState.resultAudits}
-          />
-        )}
-
-        {isNotificationModalOpen && (
-          <NotificationModal
-            isOpen={isNotificationModalOpen}
-            onClose={() => setIsNotificationModalOpen(false)}
-            alertReports={alertReports}
-            permission={permission}
-            onRequestPermission={requestPermission}
-            onGoToDashboard={() => setCurrentTab('dashboard')}
-            onOpenReportResult={handleOpenReportResult}
           />
         )}
 
