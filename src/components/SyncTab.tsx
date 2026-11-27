@@ -84,11 +84,16 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
 
   // Google Drive State
   const [user, setUser] = useState<User | null>(null);
+  const [avatarError, setAvatarError] = useState(false);
   const [isDriveLoading, setIsDriveLoading] = useState(false);
   const [isUploadingDrive, setIsUploadingDrive] = useState(false);
   const [driveStatus, setDriveStatus] = useState<string>('');
   const [recentBackups, setRecentBackups] = useState<DriveBackupFile[]>([]);
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.photoURL]);
 
   // Restore Modal State
   const [restoreModalFile, setRestoreModalFile] = useState<DriveBackupFile | null>(null);
@@ -959,11 +964,17 @@ export const SyncTab: React.FC<SyncTabProps> = ({ appState, onUpdateState }) => 
             <div className="space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5">
-                  {user.photoURL ? (
-                    <img src={user.photoURL} alt={user.displayName || ''} className="w-8 h-8 rounded-full border border-blue-300" />
+                  {user.photoURL && !avatarError ? (
+                    <img
+                      src={user.photoURL}
+                      alt={user.displayName || ''}
+                      referrerPolicy="no-referrer"
+                      onError={() => setAvatarError(true)}
+                      className="w-8 h-8 rounded-full border border-blue-300 object-cover shrink-0"
+                    />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center">
-                      {user.email?.charAt(0).toUpperCase()}
+                    <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                      {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
                     </div>
                   )}
                   <div>
