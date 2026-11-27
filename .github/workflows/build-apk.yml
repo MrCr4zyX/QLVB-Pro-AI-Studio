@@ -174,19 +174,21 @@ jobs:
 
           echo "Capacitor configuration ready"
 
-      # 9. Tao va dong bo Android (Tu dong cap nhat version + Quyen thong bao Status Bar)
+      # 9. Tao va dong bo Android (Tu dong cap nhat version + Ky co dinh + Quyen thong bao Status Bar)
       - name: Prepare Capacitor Android
         shell: bash
         env:
           APP_VERSION_NAME: ${{ steps.app_version.outputs.version_name }}
           APP_VERSION_CODE: ${{ steps.app_version.outputs.version_code }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           if [ ! -f android/gradlew ]; then
             npx cap add android
           fi
 
-          # Cap nhat version + toi uu dung luong APK: bat R8 minify + shrinkResources + giu ngon ngu vi/en + loai bo metadata thua
+          # Cap nhat version + ky APK co dinh + toi uu dung luong APK (R8 minify + shrinkResources)
           python3 - <<'GRADLE_PY'
+          import base64
           import os
           from pathlib import Path
           import re
@@ -194,6 +196,16 @@ jobs:
 
           version_name = os.environ["APP_VERSION_NAME"]
           version_code = os.environ["APP_VERSION_CODE"]
+          keystore_b64 = os.environ.get("ANDROID_KEYSTORE_BASE64", "").strip()
+
+          use_release_signing = False
+          if keystore_b64:
+              ks_path = Path("android/app/qlvb-release.keystore")
+              ks_path.write_bytes(base64.b64decode("".join(keystore_b64.split())))
+              use_release_signing = True
+              print("Decoded persistent release keystore from GitHub Secret ANDROID_KEYSTORE_BASE64")
+          else:
+              print("::warning::Chua cau hinh secret ANDROID_KEYSTORE_BASE64 -> tam ky bang debug.keystore ngau nhien (khong cai de duoc giua cac lan build).")
 
           gradle_path = Path("android/app/build.gradle")
           if gradle_path.exists():
@@ -210,10 +222,34 @@ jobs:
                       count=1,
                   )
 
+              signing_ref = "signingConfigs.release" if use_release_signing else "signingConfigs.debug"
+
+              if use_release_signing and "qlvb-release.keystore" not in text:
+                  signing_block = (
+                      "\n    signingConfigs {\n"
+                      "        release {\n"
+                      "            storeFile file(\"qlvb-release.keystore\")\n"
+                      "            storePassword System.getenv(\"ANDROID_KEYSTORE_PASSWORD\")\n"
+                      "            keyAlias (System.getenv(\"ANDROID_KEY_ALIAS\") ?: \"qlvbkey\")\n"
+                      "            keyPassword (System.getenv(\"ANDROID_KEY_PASSWORD\") ?: System.getenv(\"ANDROID_KEYSTORE_PASSWORD\"))\n"
+                      "            v1SigningEnabled true\n"
+                      "            v2SigningEnabled true\n"
+                      "        }\n"
+                      "    }"
+                  )
+                  text = re.sub(r'(\n\s*buildTypes\s*\{)', signing_block + r'\1', text, count=1)
+
               if "shrinkResources" not in text:
                   text = re.sub(
                       r'minifyEnabled\s+false',
-                      'minifyEnabled true\n            shrinkResources true\n            signingConfig signingConfigs.debug',
+                      f'minifyEnabled true\n            shrinkResources true\n            signingConfig {signing_ref}',
+                      text,
+                      count=1,
+                  )
+              else:
+                  text = re.sub(
+                      r'signingConfig\s+signingConfigs\.\w+',
+                      f'signingConfig {signing_ref}',
                       text,
                       count=1,
                   )
@@ -232,7 +268,7 @@ jobs:
                   )
 
               gradle_path.write_text(text, encoding="utf-8")
-              print("Patched android/app/build.gradle for optimized R8 release APK")
+              print(f"Patched android/app/build.gradle (signing={signing_ref})")
 
               proguard_path = Path("android/app/proguard-rules.pro")
               proguard_rules = textwrap.dedent("""\
@@ -875,16 +911,21 @@ jobs:
             echo "sdk.dir=$ANDROID_HOME" > android/local.properties
           fi
 
-      # 16. Build Optimized Release APK (nen R8 + shrinkResources + ky debug tu dong)
+      # 16. Build Optimized Release APK (nen R8 + shrinkResources + ky co dinh)
       - name: Build Optimized APK
         working-directory: android
         shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          trap 'rm -f app/qlvb-release.keystore' EXIT
           ./gradlew assembleRelease \
             --no-daemon \
             --stacktrace
 
-      # 17. Doi ten APK va in dung luong
+      # 17. Doi ten APK, in dung luong va kiem tra chu ky
       - name: Rename APK
         shell: bash
         env:
@@ -895,6 +936,9 @@ jobs:
           APK_OUT="QLVB-PRO-v${APP_VERSION_NAME}.apk"
           cp "$APK_SRC" "$APK_OUT"
           ls -lh "$APK_OUT"
+          if [ -x "$ANDROID_HOME/build-tools/35.0.0/apksigner" ]; then
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK_OUT" || true
+          fi
 
       # 18. Upload APK
       - name: Upload APK
