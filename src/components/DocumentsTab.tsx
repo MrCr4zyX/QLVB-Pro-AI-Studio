@@ -60,32 +60,52 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
     });
   };
 
-  // Counts per effect_status (respecting search, type, and field filters)
-  const effectCounts = useMemo(() => {
+  // Faceted counts per effect_status, document type, and work field
+  const { effectCounts, typeCounts, fieldCounts } = useMemo(() => {
     const key = searchKey(searchTerm);
-    const counts = {
+    const eCounts = {
       'Tất cả': 0,
       'Còn hiệu lực': 0,
       'Cần rà soát': 0,
       'Hết hiệu lực': 0,
     };
+    const tCounts: { total: number; byName: Record<string, number> } = { total: 0, byName: {} };
+    const fCounts: { total: number; byName: Record<string, number> } = { total: 0, byName: {} };
 
     for (const d of documents) {
-      if (selectedType !== 'Tất cả' && d.typeName !== selectedType) continue;
-      if (selectedField !== 'Tất cả' && !d.fieldNames.includes(selectedField)) continue;
       if (key) {
         const haystack = searchKey(
           `${d.number} ${d.symbol} ${d.agency} ${d.summary} ${d.notes} ${d.amendment_text} ${d.fieldNames.join(' ')}`
         );
         if (!haystack.includes(key)) continue;
       }
-      counts['Tất cả']++;
-      if (d.effect_status === 'Còn hiệu lực') counts['Còn hiệu lực']++;
-      else if (d.effect_status === 'Cần rà soát') counts['Cần rà soát']++;
-      else if (d.effect_status === 'Hết hiệu lực') counts['Hết hiệu lực']++;
+
+      const matchType = selectedType === 'Tất cả' || d.typeName === selectedType;
+      const matchField = selectedField === 'Tất cả' || d.fieldNames.includes(selectedField);
+      const matchEffect = selectedEffect === 'Tất cả' || d.effect_status === selectedEffect;
+
+      if (matchType && matchField) {
+        eCounts['Tất cả']++;
+        if (d.effect_status === 'Còn hiệu lực') eCounts['Còn hiệu lực']++;
+        else if (d.effect_status === 'Cần rà soát') eCounts['Cần rà soát']++;
+        else if (d.effect_status === 'Hết hiệu lực') eCounts['Hết hiệu lực']++;
+      }
+
+      if (matchField && matchEffect) {
+        tCounts.total++;
+        tCounts.byName[d.typeName] = (tCounts.byName[d.typeName] || 0) + 1;
+      }
+
+      if (matchType && matchEffect) {
+        fCounts.total++;
+        for (const fname of d.fieldNames) {
+          fCounts.byName[fname] = (fCounts.byName[fname] || 0) + 1;
+        }
+      }
     }
-    return counts;
-  }, [documents, searchTerm, selectedType, selectedField]);
+
+    return { effectCounts: eCounts, typeCounts: tCounts, fieldCounts: fCounts };
+  }, [documents, searchTerm, selectedType, selectedField, selectedEffect]);
 
   const filteredDocs = useMemo(() => {
     const key = searchKey(searchTerm);
@@ -242,10 +262,10 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
                 onChange={(e) => setSelectedType(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-slate-700 font-medium"
               >
-                <option value="Tất cả">Tất cả loại</option>
+                <option value="Tất cả">Tất cả loại ({typeCounts.total})</option>
                 {documentTypes.map((t) => (
                   <option key={t.id} value={t.name}>
-                    {t.name}
+                    {t.name} ({typeCounts.byName[t.name] || 0})
                   </option>
                 ))}
               </select>
@@ -261,10 +281,10 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
                 onChange={(e) => setSelectedField(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-slate-700 font-medium"
               >
-                <option value="Tất cả">Tất cả lĩnh vực</option>
+                <option value="Tất cả">Tất cả lĩnh vực ({fieldCounts.total})</option>
                 {workFields.map((f) => (
                   <option key={f.id} value={f.name}>
-                    {f.name}
+                    {f.name} ({fieldCounts.byName[f.name] || 0})
                   </option>
                 ))}
               </select>
@@ -280,28 +300,21 @@ export const DocumentsTab: React.FC<DocumentsTabProps> = ({
                 onChange={(e) => setSelectedEffect(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-slate-700 font-medium"
               >
-                <option value="Tất cả">Tất cả trạng thái</option>
-                <option value="Còn hiệu lực">Còn hiệu lực</option>
-                <option value="Hết hiệu lực">Hết hiệu lực</option>
-                <option value="Cần rà soát">Cần rà soát</option>
+                <option value="Tất cả">Tất cả trạng thái ({effectCounts['Tất cả']})</option>
+                <option value="Còn hiệu lực">Còn hiệu lực ({effectCounts['Còn hiệu lực']})</option>
+                <option value="Hết hiệu lực">Hết hiệu lực ({effectCounts['Hết hiệu lực']})</option>
+                <option value="Cần rà soát">Cần rà soát ({effectCounts['Cần rà soát']})</option>
               </select>
             </div>
           </div>
         </div>
       )}
 
-      {/* Results Count & Quick Actions */}
+      {/* Results Count */}
       <div className="flex items-center justify-between text-xs px-1">
         <span className="text-slate-500 font-medium">
           Hiển thị <strong className="text-slate-800">{filteredDocs.length}</strong> / {documents.length} văn bản
         </span>
-        <button
-          onClick={onAddNew}
-          className="text-blue-700 font-bold hover:underline flex items-center gap-1 text-[11px]"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Thêm văn bản mới</span>
-        </button>
       </div>
 
       {/* Document Cards List */}
